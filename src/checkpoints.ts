@@ -13,18 +13,23 @@ export function createCheckpoints(
 ): CheckpointResult {
   const checkpoints: Checkpoint[] = [];
 
-  // Checkpoint positions — placed at road intersections and along roads
+  // Checkpoint positions — spread across the 800×800 map at intersections
   const cpPositions = [
-    { x: 0, z: 30 },
-    { x: 30, z: 60 },
-    { x: 60, z: 30 },
-    { x: 60, z: -30 },
-    { x: 30, z: 0 },
-    { x: 0, z: -60 },
-    { x: -30, z: 0 },
-    { x: 0, z: 90 },
-    { x: 60, z: -80 },
-    { x: -30, z: -60 },
+    { x: 0, z: 50 },
+    { x: 50, z: 0 },
+    { x: 100, z: -50 },
+    { x: 150, z: 0 },
+    { x: 100, z: 100 },
+    { x: 0, z: 150 },
+    { x: -100, z: 100 },
+    { x: -150, z: 0 },
+    { x: -100, z: -100 },
+    { x: 0, z: -150 },
+    { x: 200, z: -100 },
+    { x: -200, z: 100 },
+    { x: 250, z: 50 },
+    { x: -250, z: -50 },
+    { x: 0, z: 300 },
   ];
 
   // Materials

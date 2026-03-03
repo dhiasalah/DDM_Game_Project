@@ -39,11 +39,33 @@ export interface DestructibleObject {
   respawnTimer: number;
 }
 
+export interface TreeData {
+  x: number;
+  z: number;
+}
+
+export interface ParkedCarData {
+  x: number;
+  z: number;
+  halfW: number;
+  halfD: number;
+  rotY: number;
+}
+
+export interface IntersectionData {
+  x: number;
+  z: number;
+}
+
 export interface EnvironmentResult {
   ground: Mesh;
   roads: Mesh[];
   buildingData: BuildingData[];
   destructibles: DestructibleObject[];
+  treeData: TreeData[];
+  parkedCars: ParkedCarData[];
+  intersections: IntersectionData[];
+  updateVisibility: (playerX: number, playerZ: number) => void;
 }
 
 // ── Car ──
@@ -102,6 +124,9 @@ export interface CollisionCallbacks {
   onPedestrianHit: (hitPos: Vector3, hitCount: number) => void;
   onDestructibleHit: (obj: DestructibleObject) => void;
   onCheckpointHit: (index: number) => void;
+  onPoliceHit: (contactPos: Vector3) => void;
+  triggerCollisionSparks: (position: Vector3) => void;
+  triggerHitParticles: (position: Vector3) => void;
 }
 
 export interface CollisionResult {
@@ -129,8 +154,8 @@ export interface CheckpointResult {
 }
 
 // ── Police ──
-export interface PoliceCar {
-  mesh: Mesh;
+export interface PoliceUnitData {
+  root: Mesh;
   speed: number;
   active: boolean;
 }
@@ -139,6 +164,8 @@ export interface PoliceResult {
   updatePolice: (dt: number) => void;
   getWantedLevel: () => number;
   addWantedHeat: (amount: number) => void;
+  getPoliceUnits: () => PoliceUnitData[];
+  setPoliceSpeed: (index: number, speed: number) => void;
 }
 
 // ── HUD ──

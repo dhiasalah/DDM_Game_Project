@@ -18,7 +18,11 @@ export function createPolice(
   // ============ WANTED SYSTEM ============
   let wantedHeat = 0; // Accumulates from ped hits / destruction
   let wantedLevel = 0; // 0-5 stars
-  const maxPoliceCars = 3;
+  const maxPoliceCars = 5;
+  let heatDecayCooldown = 0; // Seconds remaining before heat can start decaying
+  const HEAT_DECAY_COOLDOWN = 12; // Seconds after last crime before heat decays
+  const HEAT_DECAY_RATE = 0.08; // Heat lost per second (slow)
+  const MIN_CHASE_TIME = 20; // Minimum seconds a police car stays active
 
   interface PoliceUnit {
     root: Mesh;
@@ -28,6 +32,7 @@ export function createPolice(
     speed: number;
     active: boolean;
     steerAngle: number;
+    activeTimer: number;
   }
 
   const policeUnits: PoliceUnit[] = [];
@@ -144,6 +149,7 @@ export function createPolice(
       speed: 0,
       active: false,
       steerAngle: 0,
+      activeTimer: 0,
     };
   }
 
@@ -156,13 +162,13 @@ export function createPolice(
   function spawnPoliceCar(unit: PoliceUnit): void {
     // Spawn far from player, on a road
     const angle = Math.random() * Math.PI * 2;
-    const dist = 60 + Math.random() * 40;
+    const dist = 80 + Math.random() * 70;
     let spawnX = carRoot.position.x + Math.cos(angle) * dist;
     let spawnZ = carRoot.position.z + Math.sin(angle) * dist;
 
     // Clamp to world
-    spawnX = Math.max(-180, Math.min(180, spawnX));
-    spawnZ = Math.max(-180, Math.min(180, spawnZ));
+    spawnX = Math.max(-380, Math.min(380, spawnX));
+    spawnZ = Math.max(-380, Math.min(380, spawnZ));
 
     unit.root.position.set(spawnX, 0.55, spawnZ);
     unit.root.rotation.y = Math.atan2(
@@ -171,6 +177,7 @@ export function createPolice(
     );
     unit.speed = 0;
     unit.active = true;
+    unit.activeTimer = 0;
     unit.root.setEnabled(true);
   }
 
@@ -208,18 +215,20 @@ export function createPolice(
 
   // ============ UPDATE ============
   function updatePolice(dt: number): void {
-    // Calculate wanted level from heat
+    // Calculate wanted level from heat (lower thresholds so hits matter)
     const prevLevel = wantedLevel;
-    if (wantedHeat >= 15) wantedLevel = 5;
-    else if (wantedHeat >= 10) wantedLevel = 4;
-    else if (wantedHeat >= 6) wantedLevel = 3;
-    else if (wantedHeat >= 3) wantedLevel = 2;
-    else if (wantedHeat >= 1) wantedLevel = 1;
+    if (wantedHeat >= 12) wantedLevel = 5;
+    else if (wantedHeat >= 8) wantedLevel = 4;
+    else if (wantedHeat >= 5) wantedLevel = 3;
+    else if (wantedHeat >= 2.5) wantedLevel = 2;
+    else if (wantedHeat >= 0.5) wantedLevel = 1;
     else wantedLevel = 0;
 
-    // Slowly decay heat
-    if (wantedHeat > 0) {
-      wantedHeat -= 0.02 * dt;
+    // Decay cooldown — heat only decays once the cooldown expires
+    if (heatDecayCooldown > 0) {
+      heatDecayCooldown -= dt;
+    } else if (wantedHeat > 0) {
+      wantedHeat -= HEAT_DECAY_RATE * dt;
       if (wantedHeat < 0) wantedHeat = 0;
     }
 
@@ -237,13 +246,25 @@ export function createPolice(
       }
     }
 
-    // Despawn excess units
+    // Despawn excess units — only if they've been active long enough
     if (activeCount > targetCount) {
       for (let i = policeUnits.length - 1; i >= 0; i--) {
-        if (policeUnits[i].active && activeCount > targetCount) {
-          policeUnits[i].active = false;
-          policeUnits[i].root.setEnabled(false);
-          activeCount--;
+        const u = policeUnits[i];
+        if (
+          u.active &&
+          activeCount > targetCount &&
+          u.activeTimer >= MIN_CHASE_TIME
+        ) {
+          // Also only despawn if far from player (>100 units away)
+          const dx = u.root.position.x - carRoot.position.x;
+          const dz = u.root.position.z - carRoot.position.z;
+          const distSq = dx * dx + dz * dz;
+          if (distSq > 10000) {
+            // 100^2
+            u.active = false;
+            u.root.setEnabled(false);
+            activeCount--;
+          }
         }
       }
     }
@@ -251,6 +272,9 @@ export function createPolice(
     // Update active police cars
     policeUnits.forEach((unit) => {
       if (!unit.active) return;
+
+      // Track how long this unit has been active
+      unit.activeTimer += dt;
 
       // Chase AI — steer toward player
       const toPlayerX = carRoot.position.x - unit.root.position.x;
@@ -301,7 +325,7 @@ export function createPolice(
       }
 
       // World boundary
-      const lim = 190;
+      const lim = 390;
       unit.root.position.x = Math.max(
         -lim,
         Math.min(lim, unit.root.position.x),
@@ -325,7 +349,28 @@ export function createPolice(
 
   function addWantedHeat(amount: number): void {
     wantedHeat += amount;
+    heatDecayCooldown = HEAT_DECAY_COOLDOWN; // Reset decay cooldown on every crime
   }
 
-  return { updatePolice, getWantedLevel, addWantedHeat };
+  function getPoliceUnits() {
+    return policeUnits.map((u) => ({
+      root: u.root,
+      speed: u.speed,
+      active: u.active,
+    }));
+  }
+
+  function setPoliceSpeed(index: number, speed: number): void {
+    if (index >= 0 && index < policeUnits.length) {
+      policeUnits[index].speed = speed;
+    }
+  }
+
+  return {
+    updatePolice,
+    getWantedLevel,
+    addWantedHeat,
+    getPoliceUnits,
+    setPoliceSpeed,
+  };
 }

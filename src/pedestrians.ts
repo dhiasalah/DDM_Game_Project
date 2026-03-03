@@ -71,22 +71,53 @@ export function createPedestrians(
   });
 
   // ============ SPAWN DATA ============
+  // Spread across the 800×800 map along sidewalks & cross-streets
   const spawnData: SpawnData[] = [
+    // Central area
     { x: 9, z: -30, axis: "z", min: -60, max: 0 },
     { x: -9, z: -50, axis: "z", min: -80, max: -20 },
-    { x: 9, z: -80, axis: "z", min: -110, max: -50 },
-    { x: -9, z: 30, axis: "z", min: 10, max: 55 },
     { x: 9, z: 50, axis: "z", min: 20, max: 80 },
-    { x: 3, z: -40, axis: "z", min: -70, max: -10 },
-    { x: -3, z: 40, axis: "z", min: 10, max: 70 },
+    { x: -9, z: 30, axis: "z", min: 10, max: 55 },
     { x: 20, z: -5, axis: "x", min: 10, max: 50 },
     { x: -20, z: 5, axis: "x", min: -50, max: -10 },
-    { x: 35, z: 3, axis: "x", min: 10, max: 55 },
-    { x: 68, z: -40, axis: "z", min: -70, max: -10 },
-    { x: 52, z: -60, axis: "z", min: -90, max: -30 },
-    { x: 20, z: 68, axis: "x", min: 10, max: 50 },
-    { x: -20, z: 52, axis: "x", min: -50, max: -10 },
-    { x: -4, z: -100, axis: "z", min: -130, max: -70 },
+    // Mid-city ring
+    { x: 59, z: -80, axis: "z", min: -120, max: -40 },
+    { x: -59, z: -60, axis: "z", min: -100, max: -20 },
+    { x: 59, z: 70, axis: "z", min: 30, max: 110 },
+    { x: -59, z: 80, axis: "z", min: 40, max: 120 },
+    { x: 80, z: -9, axis: "x", min: 55, max: 110 },
+    { x: -80, z: 9, axis: "x", min: -110, max: -55 },
+    { x: 110, z: -9, axis: "x", min: 60, max: 140 },
+    { x: -110, z: 9, axis: "x", min: -140, max: -60 },
+    // Further out
+    { x: 159, z: -30, axis: "z", min: -70, max: 10 },
+    { x: -159, z: 30, axis: "z", min: -10, max: 70 },
+    { x: 9, z: -180, axis: "z", min: -220, max: -140 },
+    { x: -9, z: 180, axis: "z", min: 140, max: 220 },
+    { x: 209, z: -60, axis: "z", min: -100, max: -20 },
+    { x: -209, z: 60, axis: "z", min: 20, max: 100 },
+    // Outer ring
+    { x: 259, z: 9, axis: "x", min: 210, max: 300 },
+    { x: -259, z: -9, axis: "x", min: -300, max: -210 },
+    { x: 9, z: -280, axis: "z", min: -330, max: -240 },
+    { x: -9, z: 280, axis: "z", min: 240, max: 330 },
+    { x: 59, z: 200, axis: "z", min: 160, max: 240 },
+    { x: -59, z: -200, axis: "z", min: -240, max: -160 },
+    { x: 159, z: 150, axis: "z", min: 110, max: 190 },
+    { x: -159, z: -150, axis: "z", min: -190, max: -110 },
+    { x: 200, z: 59, axis: "x", min: 160, max: 240 },
+    { x: -200, z: -59, axis: "x", min: -240, max: -160 },
+    // Extra scattered
+    { x: 309, z: -40, axis: "z", min: -80, max: 0 },
+    { x: -309, z: 40, axis: "z", min: 0, max: 80 },
+    { x: 9, z: 330, axis: "z", min: 290, max: 370 },
+    { x: -9, z: -330, axis: "z", min: -370, max: -290 },
+    { x: 100, z: -200, axis: "z", min: -240, max: -160 },
+    { x: -100, z: 200, axis: "z", min: 160, max: 240 },
+    { x: 59, z: -300, axis: "z", min: -340, max: -260 },
+    { x: -59, z: 300, axis: "z", min: 260, max: 340 },
+    { x: 250, z: -150, axis: "z", min: -190, max: -110 },
+    { x: -250, z: 150, axis: "z", min: 110, max: 190 },
   ];
 
   // ============ CREATE PEDESTRIAN MESH ============
@@ -258,8 +289,8 @@ export function createPedestrians(
       const dx = ped.mesh.root.position.x - carRoot.position.x;
       const dz = ped.mesh.root.position.z - carRoot.position.z;
       const distSq = dx * dx + dz * dz;
-      if (distSq < 6400) {
-        // 80 * 80
+      if (distSq < 10000) {
+        // 100 * 100
         ped.walkPhase += dt * ped.speed * 4;
         const swing = Math.sin(ped.walkPhase) * 0.4;
         ped.mesh.leftLeg.rotation.x = swing;

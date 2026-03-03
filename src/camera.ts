@@ -17,7 +17,7 @@ export function setupCamera(
 
   camera.fov = 0.9;
   camera.minZ = 0.5;
-  camera.maxZ = 600;
+  camera.maxZ = 1000;
 
   camera.inputs.clear();
 

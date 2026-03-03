@@ -36,10 +36,13 @@ async function main(): Promise<void> {
     const { shadowGenerator, pipeline } = setupLighting(scene);
 
     // --- Environment ---
-    const { buildingData, destructibles } = createEnvironment(
-      scene,
-      shadowGenerator,
-    );
+    const {
+      buildingData,
+      destructibles,
+      treeData,
+      parkedCars,
+      updateVisibility,
+    } = createEnvironment(scene, shadowGenerator);
 
     // --- Car ---
     const { carRoot, updateCar, getSpeed, setSpeed } = createCar(
@@ -116,7 +119,16 @@ async function main(): Promise<void> {
         onCheckpointHit(_index) {
           showCollisionText("CHECKPOINT!", "#00ff66");
         },
+        onPoliceHit(contactPos) {
+          triggerCollisionSparks(contactPos);
+          showCollisionText("POLICE HIT!", "#ff4444");
+        },
+        triggerCollisionSparks,
+        triggerHitParticles,
       },
+      policeResult,
+      treeData,
+      parkedCars,
     );
 
     // ============ RENDER LOOP LOGIC ============
@@ -130,11 +142,13 @@ async function main(): Promise<void> {
       const dt = Math.min(deltaTime, 0.05);
 
       const speed = updateCar(keys, dt);
+      updateVisibility(carRoot.position.x, carRoot.position.z);
+      policeResult.updatePolice(dt);
       checkCollisions(dt);
       updatePedestrians(dt);
       updateParticles(keys, speed);
       updateSpeed(speed, keys);
-
+      
       // Checkpoints
       checkpointResult.updateCheckpoints(dt);
       updateCheckpointHUD(
@@ -154,8 +168,7 @@ async function main(): Promise<void> {
         showMissionComplete(checkpointResult.getMissionTime());
       }
 
-      // Police
-      policeResult.updatePolice(dt);
+      // Wanted level HUD
       updateWantedLevel(policeResult.getWantedLevel());
     });
 
