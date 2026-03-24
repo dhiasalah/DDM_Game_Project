@@ -19,5 +19,14 @@ export function setupInput(_scene: Scene): Keys {
     keys[evt.key.toLowerCase()] = false;
   });
 
+  // Mouse button tracking (for punching)
+  document.addEventListener("mousedown", (evt: MouseEvent) => {
+    if (evt.button === 0) keys["mouse0"] = true;
+  });
+
+  document.addEventListener("mouseup", (evt: MouseEvent) => {
+    if (evt.button === 0) keys["mouse0"] = false;
+  });
+
   return keys;
 }

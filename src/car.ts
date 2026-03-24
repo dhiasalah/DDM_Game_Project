@@ -9,7 +9,7 @@ import {
   Axis,
 } from "@babylonjs/core";
 import type { Scene, ShadowGenerator, Mesh } from "@babylonjs/core";
-import type { Keys, CarResult } from "./types";
+import type { Keys, CarResult, VehicleStats } from "./types";
 
 // Cached Color3 values for taillight emissive (avoid per-frame allocation)
 const BRAKE_EMISSIVE = new Color3(1.0, 0.15, 0.05);
@@ -226,7 +226,7 @@ export function createCar(
   wheelPositions.forEach((wp) => {
     const tire = MeshBuilder.CreateTorus(
       wp.name + "_tire",
-      { diameter: 0.65, thickness: 0.22, tessellation: 24 },
+      { diameter: 0.65, thickness: 0.22, tessellation: 12 },
       scene,
     );
 
@@ -250,11 +250,8 @@ export function createCar(
     wheels.push({ node: wheelNode, tire, rim, front: wp.front });
   });
 
-  // ============ SHADOW CASTERS ============
+  // ============ SHADOW CASTERS (only root body — children are too small) ============
   shadowGenerator.addShadowCaster(carRoot);
-  shadowGenerator.addShadowCaster(cabin);
-  shadowGenerator.addShadowCaster(hood);
-  shadowGenerator.addShadowCaster(trunk);
 
   // ============ NO PHYSICS — MANUAL ARCADE MOVEMENT ============
   const groundY = 0.55;
@@ -262,13 +259,14 @@ export function createCar(
 
   // ============ UPDATE FUNCTION ============
   let currentSpeed = 0;
-  const maxForwardSpeed = 45;
-  const maxReverseSpeed = 15;
-  const accelRate = 20;
-  const reverseRate = 15;
-  const brakeRate = 35;
-  const dragRate = 5;
-  const steerSpeed = 2.5;
+  let maxForwardSpeed = 45;
+  let maxReverseSpeed = 15;
+  let accelRate = 20;
+  let reverseRate = 15;
+  let brakeRate = 35;
+  let dragRate = 5;
+  let steerSpeed = 2.5;
+  let currentVehicleType = "default";
   let wheelSpinAngle = 0;
   let steerAngle = 0;
 
@@ -362,5 +360,39 @@ export function createCar(
     currentSpeed = s;
   }
 
-  return { carRoot, updateCar, getSpeed, setSpeed };
+  function setVehicleStats(stats: VehicleStats): void {
+    maxForwardSpeed = stats.topSpeed;
+    maxReverseSpeed = stats.topSpeed * 0.33;
+    accelRate = stats.acceleration;
+    brakeRate = stats.braking;
+    steerSpeed = stats.handling;
+    reverseRate = stats.acceleration * 0.75;
+    dragRate = stats.mass > 1.5 ? 3 : 5;
+    currentVehicleType = stats.name;
+
+    // Update body color
+    if (bodyMat) {
+      bodyMat.albedoColor = stats.bodyColor.clone();
+    }
+  }
+
+  function setBodyColor(color: Color3): void {
+    if (bodyMat) {
+      bodyMat.albedoColor = color.clone();
+    }
+  }
+
+  function getCurrentVehicleType(): string {
+    return currentVehicleType;
+  }
+
+  return {
+    carRoot,
+    updateCar,
+    getSpeed,
+    setSpeed,
+    setVehicleStats,
+    setBodyColor,
+    getCurrentVehicleType,
+  };
 }

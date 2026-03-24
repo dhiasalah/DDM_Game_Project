@@ -13,10 +13,11 @@ import {
 import type { ShadowGenerator } from "@babylonjs/core";
 import type {
   BuildingData,
-  EnvironmentResult,
+  EnvironmentResultExtended,
   DestructibleObject,
   ParkedCarData,
   IntersectionData,
+  TrafficLightState,
 } from "./types";
 
 /* ================================================================
@@ -33,7 +34,7 @@ function seededRandom(seed: number): () => number {
 export function createEnvironment(
   scene: Scene,
   shadowGenerator: ShadowGenerator,
-): EnvironmentResult {
+): EnvironmentResultExtended {
   const rand = seededRandom(42);
   const MAP_SIZE = 800;
   const HALF = MAP_SIZE / 2; // 400
@@ -660,36 +661,95 @@ export function createEnvironment(
   trafficPoleMat.diffuseColor = new Color3(0.25, 0.25, 0.28);
   trafficPoleMat.freeze();
 
-  const trafficRedMat = new StandardMaterial("trRed", scene);
-  trafficRedMat.diffuseColor = new Color3(0.8, 0.1, 0.1);
-  trafficRedMat.emissiveColor = new Color3(0.5, 0.02, 0.02);
-  trafficRedMat.freeze();
+  // On / off materials for each color
+  const trafficRedOnMat = new StandardMaterial("trRedOn", scene);
+  trafficRedOnMat.diffuseColor = new Color3(0.8, 0.1, 0.1);
+  trafficRedOnMat.emissiveColor = new Color3(0.5, 0.02, 0.02);
+  trafficRedOnMat.freeze();
 
-  const trafficYellowMat = new StandardMaterial("trYlw", scene);
-  trafficYellowMat.diffuseColor = new Color3(0.9, 0.8, 0.1);
-  trafficYellowMat.emissiveColor = new Color3(0.4, 0.35, 0.02);
-  trafficYellowMat.freeze();
+  const trafficRedOffMat = new StandardMaterial("trRedOff", scene);
+  trafficRedOffMat.diffuseColor = new Color3(0.25, 0.05, 0.05);
+  trafficRedOffMat.freeze();
 
-  const trafficGreenMat = new StandardMaterial("trGrn", scene);
-  trafficGreenMat.diffuseColor = new Color3(0.1, 0.7, 0.2);
-  trafficGreenMat.emissiveColor = new Color3(0.02, 0.3, 0.05);
-  trafficGreenMat.freeze();
+  const trafficYellowOnMat = new StandardMaterial("trYlwOn", scene);
+  trafficYellowOnMat.diffuseColor = new Color3(0.9, 0.8, 0.1);
+  trafficYellowOnMat.emissiveColor = new Color3(0.4, 0.35, 0.02);
+  trafficYellowOnMat.freeze();
 
-  const allTrafficMeshes: Mesh[] = [];
+  const trafficYellowOffMat = new StandardMaterial("trYlwOff", scene);
+  trafficYellowOffMat.diffuseColor = new Color3(0.25, 0.2, 0.05);
+  trafficYellowOffMat.freeze();
+
+  const trafficGreenOnMat = new StandardMaterial("trGrnOn", scene);
+  trafficGreenOnMat.diffuseColor = new Color3(0.1, 0.7, 0.2);
+  trafficGreenOnMat.emissiveColor = new Color3(0.02, 0.3, 0.05);
+  trafficGreenOnMat.freeze();
+
+  const trafficGreenOffMat = new StandardMaterial("trGrnOff", scene);
+  trafficGreenOffMat.diffuseColor = new Color3(0.05, 0.18, 0.07);
+  trafficGreenOffMat.freeze();
+
+  const allTrafficPoleMeshes: Mesh[] = []; // poles & boxes — can merge
+
+  // Per-intersection traffic light data
+  interface TrafficLightMeshes {
+    redNS: Mesh[];
+    yellowNS: Mesh[];
+    greenNS: Mesh[];
+    redEW: Mesh[];
+    yellowEW: Mesh[];
+    greenEW: Mesh[];
+  }
+
+  const LIGHT_GREEN_DUR = 15;
+  const LIGHT_YELLOW_DUR = 3;
+  const LIGHT_RED_DUR = LIGHT_GREEN_DUR + LIGHT_YELLOW_DUR; // 18 — keeps phases in sync
+  const LIGHT_CYCLE = LIGHT_GREEN_DUR + LIGHT_YELLOW_DUR + LIGHT_RED_DUR; // not needed, but clarity
+
+  // Each tracked intersection has its timer and mesh references
+  interface TrafficLightEntry {
+    x: number;
+    z: number;
+    timer: number;
+    meshes: TrafficLightMeshes;
+    prevNS: string;
+    prevEW: string;
+  }
+
+  const trafficLightEntries: TrafficLightEntry[] = [];
 
   intersections.forEach((inter, idx) => {
     if (idx % 2 !== 0) return;
     if (Math.abs(inter.x) > HALF - 60 || Math.abs(inter.z) > HALF - 60) return;
 
-    const offsets = [
+    const entry: TrafficLightEntry = {
+      x: inter.x,
+      z: inter.z,
+      timer: (idx * 7.3) % (LIGHT_GREEN_DUR + LIGHT_YELLOW_DUR + LIGHT_RED_DUR),
+      prevNS: "",
+      prevEW: "",
+      meshes: {
+        redNS: [],
+        yellowNS: [],
+        greenNS: [],
+        redEW: [],
+        yellowEW: [],
+        greenEW: [],
+      },
+    };
+
+    // NS poles (along Z axis road)
+    const nsOffsets = [
       { dx: ROAD_HALF + 1, dz: ROAD_HALF + 1 },
       { dx: -ROAD_HALF - 1, dz: -ROAD_HALF - 1 },
     ];
+    // EW poles (along X axis road)
+    const ewOffsets = [
+      { dx: ROAD_HALF + 1, dz: -ROAD_HALF - 1 },
+      { dx: -ROAD_HALF - 1, dz: ROAD_HALF + 1 },
+    ];
 
-    offsets.forEach((off) => {
-      const px = inter.x + off.dx;
-      const pz = inter.z + off.dz;
-
+    const createPole = (px: number, pz: number, group: "NS" | "EW") => {
       const pole = MeshBuilder.CreateCylinder(
         "tp",
         { diameter: 0.15, height: 5 },
@@ -697,7 +757,7 @@ export function createEnvironment(
       );
       pole.position.set(px, 2.5, pz);
       pole.material = trafficPoleMat;
-      allTrafficMeshes.push(pole);
+      allTrafficPoleMeshes.push(pole);
 
       const box = MeshBuilder.CreateBox(
         "tb",
@@ -706,40 +766,56 @@ export function createEnvironment(
       );
       box.position.set(px, 5.3, pz);
       box.material = trafficPoleMat;
-      allTrafficMeshes.push(box);
+      allTrafficPoleMeshes.push(box);
 
       const red = MeshBuilder.CreateSphere(
         "tr",
-        { diameter: 0.25, segments: 6 },
+        { diameter: 0.25, segments: 4 },
         scene,
       );
       red.position.set(px, 5.7, pz);
-      red.material = trafficRedMat;
-      allTrafficMeshes.push(red);
+      red.material = trafficRedOffMat;
 
       const yellow = MeshBuilder.CreateSphere(
         "ty",
-        { diameter: 0.25, segments: 6 },
+        { diameter: 0.25, segments: 4 },
         scene,
       );
       yellow.position.set(px, 5.3, pz);
-      yellow.material = trafficYellowMat;
-      allTrafficMeshes.push(yellow);
+      yellow.material = trafficYellowOffMat;
 
       const green = MeshBuilder.CreateSphere(
         "tg",
-        { diameter: 0.25, segments: 6 },
+        { diameter: 0.25, segments: 4 },
         scene,
       );
       green.position.set(px, 4.9, pz);
-      green.material = trafficGreenMat;
-      allTrafficMeshes.push(green);
-    });
+      green.material = trafficGreenOffMat;
+
+      if (group === "NS") {
+        entry.meshes.redNS.push(red);
+        entry.meshes.yellowNS.push(yellow);
+        entry.meshes.greenNS.push(green);
+      } else {
+        entry.meshes.redEW.push(red);
+        entry.meshes.yellowEW.push(yellow);
+        entry.meshes.greenEW.push(green);
+      }
+    };
+
+    nsOffsets.forEach((off) =>
+      createPole(inter.x + off.dx, inter.z + off.dz, "NS"),
+    );
+    ewOffsets.forEach((off) =>
+      createPole(inter.x + off.dx, inter.z + off.dz, "EW"),
+    );
+
+    trafficLightEntries.push(entry);
   });
 
-  if (allTrafficMeshes.length > 0) {
+  if (allTrafficPoleMeshes.length > 0) {
     const mergedTraffic = Mesh.MergeMeshes(
-      allTrafficMeshes,
+      allTrafficPoleMeshes,
       true,
       true,
       undefined,
@@ -749,6 +825,80 @@ export function createEnvironment(
     if (mergedTraffic) {
       mergedTraffic.freezeWorldMatrix();
     }
+  }
+
+  // Helper: get NS state from timer
+  function getNSState(timer: number): "green" | "yellow" | "red" {
+    if (timer < LIGHT_GREEN_DUR) return "green";
+    if (timer < LIGHT_GREEN_DUR + LIGHT_YELLOW_DUR) return "yellow";
+    return "red";
+  }
+  function getEWState(timer: number): "green" | "yellow" | "red" {
+    // EW is offset by half cycle — when NS is green/yellow, EW is red and vice-versa
+    const halfCycle = LIGHT_GREEN_DUR + LIGHT_YELLOW_DUR;
+    if (timer < halfCycle) return "red";
+    const ewTime = timer - halfCycle;
+    if (ewTime < LIGHT_GREEN_DUR) return "green";
+    return "yellow";
+  }
+
+  function applyLightMaterials(entry: TrafficLightEntry) {
+    const ns = getNSState(entry.timer);
+    const ew = getEWState(entry.timer);
+
+    // Skip material swaps if state hasn't changed
+    if (ns === entry.prevNS && ew === entry.prevEW) return;
+    entry.prevNS = ns;
+    entry.prevEW = ew;
+
+    entry.meshes.redNS.forEach((m) => {
+      m.material = ns === "red" ? trafficRedOnMat : trafficRedOffMat;
+    });
+    entry.meshes.yellowNS.forEach((m) => {
+      m.material = ns === "yellow" ? trafficYellowOnMat : trafficYellowOffMat;
+    });
+    entry.meshes.greenNS.forEach((m) => {
+      m.material = ns === "green" ? trafficGreenOnMat : trafficGreenOffMat;
+    });
+
+    entry.meshes.redEW.forEach((m) => {
+      m.material = ew === "red" ? trafficRedOnMat : trafficRedOffMat;
+    });
+    entry.meshes.yellowEW.forEach((m) => {
+      m.material = ew === "yellow" ? trafficYellowOnMat : trafficYellowOffMat;
+    });
+    entry.meshes.greenEW.forEach((m) => {
+      m.material = ew === "green" ? trafficGreenOnMat : trafficGreenOffMat;
+    });
+  }
+
+  // Cached traffic light states — rebuilt only when lights update
+  let cachedLightStates: TrafficLightState[] = [];
+
+  function rebuildLightStatesCache(): void {
+    cachedLightStates = trafficLightEntries.map((e) => ({
+      x: e.x,
+      z: e.z,
+      stateNS: getNSState(e.timer),
+      stateEW: getEWState(e.timer),
+    }));
+  }
+
+  // Initial apply
+  trafficLightEntries.forEach(applyLightMaterials);
+  rebuildLightStatesCache();
+
+  function updateTrafficLights(dt: number): void {
+    const fullCycle = LIGHT_GREEN_DUR + LIGHT_YELLOW_DUR + LIGHT_RED_DUR;
+    for (const entry of trafficLightEntries) {
+      entry.timer = (entry.timer + dt) % fullCycle;
+      applyLightMaterials(entry);
+    }
+    rebuildLightStatesCache();
+  }
+
+  function getTrafficLightStates(): TrafficLightState[] {
+    return cachedLightStates;
   }
 
   // ========== TREES ==========
@@ -785,7 +935,7 @@ export function createEnvironment(
 
     const crown = MeshBuilder.CreateSphere(
       "crn",
-      { diameter: 4, segments: 6 },
+      { diameter: 4, segments: 4 },
       scene,
     );
     crown.position.set(x, 4.5, z);
@@ -920,7 +1070,6 @@ export function createEnvironment(
     body.position.set(x, 0.55, z);
     body.rotation.y = rotY;
     body.material = mat;
-    allParkedCarMeshes.push(body);
 
     const cabin = MeshBuilder.CreateBox(
       "pc_c",
@@ -930,6 +1079,8 @@ export function createEnvironment(
     cabin.position.set(0, 0.45, -0.1);
     cabin.parent = body;
     cabin.material = parkedCarCabinMat;
+
+    allParkedCarMeshes.push(body);
 
     parkedCars.push({ x, z, halfW: 1.0, halfD: 2.1, rotY });
   }
@@ -1150,6 +1301,8 @@ export function createEnvironment(
   }
 
   // ========== VISIBILITY CULLING ==========
+  const TRAFFIC_LIGHT_VIS_SQ = 120 * 120; // traffic lights visible within 120 units
+
   function updateVisibility(playerX: number, playerZ: number): void {
     for (let i = 0; i < buildingMeshes.length; i++) {
       const b = buildingData[i];
@@ -1158,6 +1311,27 @@ export function createEnvironment(
       const dz = b.z - playerZ;
       const distSq = dx * dx + dz * dz;
       buildingMeshes[i].setEnabled(distSq < VIS_DIST_SQ);
+    }
+
+    // Cull traffic light spheres by distance
+    for (const entry of trafficLightEntries) {
+      const dx = entry.x - playerX;
+      const dz = entry.z - playerZ;
+      const distSq = dx * dx + dz * dz;
+      const visible = distSq < TRAFFIC_LIGHT_VIS_SQ;
+      const m = entry.meshes;
+      for (const arr of [
+        m.redNS,
+        m.yellowNS,
+        m.greenNS,
+        m.redEW,
+        m.yellowEW,
+        m.greenEW,
+      ]) {
+        for (const mesh of arr) {
+          mesh.setEnabled(visible);
+        }
+      }
     }
   }
 
@@ -1178,5 +1352,9 @@ export function createEnvironment(
     parkedCars,
     intersections,
     updateVisibility,
+    updateTrafficLights,
+    getTrafficLightStates,
+    getRoadPositionsX: () => roadsX_Z,
+    getRoadPositionsZ: () => roadsZ_X,
   };
 }

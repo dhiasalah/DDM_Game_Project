@@ -33,27 +33,28 @@ export function setupLighting(scene: Scene): LightingResult {
   sunLight.diffuse = new Color3(1.0, 0.95, 0.85);
   sunLight.specular = new Color3(1.0, 0.95, 0.8);
 
-  // --- Shadow Generator ---
-  const shadowGenerator = new ShadowGenerator(1024, sunLight);
+  // --- Shadow Generator (optimized settings) ---
+  const shadowGenerator = new ShadowGenerator(512, sunLight);
   shadowGenerator.useBlurExponentialShadowMap = true;
-  shadowGenerator.blurKernel = 16;
-  shadowGenerator.blurScale = 2;
+  shadowGenerator.blurKernel = 4; // Reduced from 8
+  shadowGenerator.blurScale = 1; // Reduced from 2
   shadowGenerator.depthScale = 50;
   shadowGenerator.setDarkness(0.3);
 
-  // --- Glow Layer ---
+  // --- Glow Layer (disabled — expensive scene re-render) ---
   const glowLayer = new GlowLayer("glowLayer", scene, {
     mainTextureSamples: 1,
-    blurKernelSize: 16,
+    blurKernelSize: 8,
   });
-  glowLayer.intensity = 0.6;
+  glowLayer.intensity = 0.4;
+  glowLayer.isEnabled = false; // disabled for performance
 
-  // --- Post-processing Pipeline ---
+  // --- Post-processing Pipeline (optimized settings) ---
   const pipeline = new DefaultRenderingPipeline("defaultPipeline", true, scene);
   pipeline.bloomEnabled = true;
-  pipeline.bloomThreshold = 0.7;
-  pipeline.bloomWeight = 0.3;
-  pipeline.bloomKernel = 32;
+  pipeline.bloomThreshold = 0.8;
+  pipeline.bloomWeight = 0.25;
+  pipeline.bloomKernel = 8; // Reduced from 16
   pipeline.bloomScale = 0.5;
 
   pipeline.fxaaEnabled = true;

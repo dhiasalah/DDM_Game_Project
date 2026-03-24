@@ -24,6 +24,12 @@ export function createPolice(
   const HEAT_DECAY_RATE = 0.08; // Heat lost per second (slow)
   const MIN_CHASE_TIME = 20; // Minimum seconds a police car stays active
 
+  // ============ BUSTED SYSTEM ============
+  let bustedTimer = 0; // Accumulates when 2+ police near and player slow
+  const BUSTED_THRESHOLD = 4.0; // Seconds standing still near police to get busted
+  let onBusted: (() => void) | null = null;
+  let bustedTriggered = false;
+
   interface PoliceUnit {
     root: Mesh;
     sirenPhase: number;
@@ -62,6 +68,11 @@ export function createPolice(
 
   const sirenOffMat = new StandardMaterial("sirenOffMat", scene);
   sirenOffMat.diffuseColor = new Color3(0.2, 0.2, 0.2);
+
+  // Shared wheel material for all police cars
+  const policeWheelMat = new StandardMaterial("policeWheelMat", scene);
+  policeWheelMat.diffuseColor = new Color3(0.1, 0.1, 0.1);
+  policeWheelMat.freeze();
 
   // ============ BUILD POLICE CAR ============
   function buildPoliceCar(index: number): PoliceUnit {
@@ -113,11 +124,7 @@ export function createPolice(
     sirenRight.parent = body;
     sirenRight.material = sirenOffMat;
 
-    // Simple wheels
-    const wheelMat = new StandardMaterial("policeWheelMat_" + index, scene);
-    wheelMat.diffuseColor = new Color3(0.1, 0.1, 0.1);
-    wheelMat.freeze();
-
+    // Simple wheels — shared material
     const wheelPositions = [
       { x: -0.95, z: 1.3 },
       { x: 0.95, z: 1.3 },
@@ -128,13 +135,13 @@ export function createPolice(
     wheelPositions.forEach((wp, wi) => {
       const wheel = MeshBuilder.CreateTorus(
         "pWheel_" + index + "_" + wi,
-        { diameter: 0.55, thickness: 0.18, tessellation: 12 },
+        { diameter: 0.55, thickness: 0.18, tessellation: 6 },
         scene,
       );
       wheel.position.set(wp.x, -0.2, wp.z);
       wheel.rotation.z = Math.PI / 2;
       wheel.parent = body;
-      wheel.material = wheelMat;
+      wheel.material = policeWheelMat;
     });
 
     shadowGenerator.addShadowCaster(body);
@@ -341,6 +348,33 @@ export function createPolice(
       unit.sirenLeft.material = sirenOn ? sirenRedMat : sirenOffMat;
       unit.sirenRight.material = sirenOn ? sirenOffMat : sirenBlueMat;
     });
+
+    // ============ BUSTED CHECK ============
+    // If 2+ police cars within 3 units of player and player speed < 2
+    if (wantedLevel > 0 && !bustedTriggered) {
+      let nearbyCount = 0;
+      for (let i = 0; i < policeUnits.length; i++) {
+        const u = policeUnits[i];
+        if (!u.active) continue;
+        const dx = u.root.position.x - carRoot.position.x;
+        const dz = u.root.position.z - carRoot.position.z;
+        if (dx * dx + dz * dz < 9) nearbyCount++; // 3u radius
+      }
+
+      // carRoot speed approximated from last frame — caller stops car on collision
+      // We check if car is essentially stationary (speed set to 0 on collision)
+      if (nearbyCount >= 2) {
+        bustedTimer += dt;
+        if (bustedTimer >= BUSTED_THRESHOLD) {
+          bustedTriggered = true;
+          if (onBusted) onBusted();
+        }
+      } else {
+        bustedTimer = Math.max(0, bustedTimer - dt * 2);
+      }
+    } else {
+      bustedTimer = 0;
+    }
   }
 
   function getWantedLevel(): number {
@@ -366,11 +400,37 @@ export function createPolice(
     }
   }
 
+  function setOnBusted(cb: () => void): void {
+    onBusted = cb;
+  }
+
+  function resetWanted(): void {
+    wantedHeat = 0;
+    wantedLevel = 0;
+    heatDecayCooldown = 0;
+    bustedTimer = 0;
+    bustedTriggered = false;
+    // Deactivate all police
+    policeUnits.forEach((u) => {
+      u.active = false;
+      u.root.setEnabled(false);
+    });
+  }
+
+  function setPlayerSpeed(speed: number): void {
+    // Used to help busted check know player speed
+    // For now busted is proximity-based, but this could be extended
+    void speed;
+  }
+
   return {
     updatePolice,
     getWantedLevel,
     addWantedHeat,
     getPoliceUnits,
     setPoliceSpeed,
+    setOnBusted,
+    resetWanted,
+    setPlayerSpeed,
   };
 }

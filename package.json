@@ -6,15 +6,20 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "convert:fbx": "powershell -ExecutionPolicy Bypass -File scripts/convert_fbx_folder.ps1"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0",
+    "axios": "^1.13.6",
     "typescript": "^5.9.3",
     "vite": "^7.3.1"
   },
   "dependencies": {
     "@babylonjs/core": "^8.51.2",
     "@babylonjs/gui": "^8.51.2",
+    "@babylonjs/loaders": "^8.56.2",
     "@babylonjs/materials": "^8.51.2"
   }
 }

@@ -1,12 +1,15 @@
-import {
-  MeshBuilder,
-  StandardMaterial,
-  TransformNode,
-  Vector3,
-  Color3,
-} from "@babylonjs/core";
+import { TransformNode, Vector3 } from "@babylonjs/core";
 import type { Scene, ShadowGenerator, Mesh } from "@babylonjs/core";
 import type { Pedestrian, PedestrianMesh, PedestriansResult } from "./types";
+import {
+  playLoop,
+  playOneShot,
+  type CharacterAnimationController,
+} from "./animations";
+import {
+  createProceduralCharacter,
+  randomPedestrianColors,
+} from "./proceduralCharacter";
 
 interface SpawnData {
   x: number;
@@ -16,71 +19,28 @@ interface SpawnData {
   max: number;
 }
 
+function placeholderPedMesh(root: TransformNode): PedestrianMesh {
+  return {
+    root,
+  };
+}
+
 export function createPedestrians(
   scene: Scene,
   shadowGenerator: ShadowGenerator,
   carRoot: Mesh,
 ): PedestriansResult {
   const pedestrians: Pedestrian[] = [];
+  const pedAnimations = new Map<Pedestrian, CharacterAnimationController>();
+  const hadFlyingState = new Set<Pedestrian>();
 
-  // ============ COLOR PALETTES ============
-  const skinColors = [
-    new Color3(0.96, 0.8, 0.69),
-    new Color3(0.87, 0.72, 0.53),
-    new Color3(0.76, 0.57, 0.4),
-    new Color3(0.55, 0.38, 0.26),
-    new Color3(0.42, 0.28, 0.18),
-  ];
-
-  const shirtColors = [
-    new Color3(0.2, 0.4, 0.8),
-    new Color3(0.8, 0.2, 0.2),
-    new Color3(0.2, 0.7, 0.3),
-    new Color3(0.9, 0.9, 0.2),
-    new Color3(0.9, 0.5, 0.1),
-    new Color3(0.6, 0.2, 0.7),
-    new Color3(0.9, 0.9, 0.9),
-    new Color3(0.15, 0.15, 0.15),
-  ];
-
-  const pantsColors = [
-    new Color3(0.15, 0.15, 0.4),
-    new Color3(0.2, 0.2, 0.2),
-    new Color3(0.5, 0.35, 0.2),
-    new Color3(0.35, 0.35, 0.35),
-  ];
-
-  // ============ PRE-CREATE SHARED MATERIAL POOLS ============
-  const skinMats = skinColors.map((c, i) => {
-    const m = new StandardMaterial("skinMat_" + i, scene);
-    m.diffuseColor = c;
-    m.freeze();
-    return m;
-  });
-  const shirtMats = shirtColors.map((c, i) => {
-    const m = new StandardMaterial("shirtMat_" + i, scene);
-    m.diffuseColor = c;
-    m.freeze();
-    return m;
-  });
-  const pantsMats = pantsColors.map((c, i) => {
-    const m = new StandardMaterial("pantsMat_" + i, scene);
-    m.diffuseColor = c;
-    m.freeze();
-    return m;
-  });
-
-  // ============ SPAWN DATA ============
-  // Spread across the 800×800 map along sidewalks & cross-streets
   const spawnData: SpawnData[] = [
-    // Central area
     { x: 9, z: -30, axis: "z", min: -60, max: 0 },
     { x: -9, z: -50, axis: "z", min: -80, max: -20 },
     { x: 9, z: 50, axis: "z", min: 20, max: 80 },
     { x: -9, z: 30, axis: "z", min: 10, max: 55 },
     { x: 20, z: -5, axis: "x", min: 10, max: 50 },
     { x: -20, z: 5, axis: "x", min: -50, max: -10 },
-    // Mid-city ring
     { x: 59, z: -80, axis: "z", min: -120, max: -40 },
     { x: -59, z: -60, axis: "z", min: -100, max: -20 },
     { x: 59, z: 70, axis: "z", min: 30, max: 110 },
@@ -89,14 +49,12 @@ export function createPedestrians(
     { x: -80, z: 9, axis: "x", min: -110, max: -55 },
     { x: 110, z: -9, axis: "x", min: 60, max: 140 },
     { x: -110, z: 9, axis: "x", min: -140, max: -60 },
-    // Further out
     { x: 159, z: -30, axis: "z", min: -70, max: 10 },
     { x: -159, z: 30, axis: "z", min: -10, max: 70 },
     { x: 9, z: -180, axis: "z", min: -220, max: -140 },
     { x: -9, z: 180, axis: "z", min: 140, max: 220 },
     { x: 209, z: -60, axis: "z", min: -100, max: -20 },
     { x: -209, z: 60, axis: "z", min: 20, max: 100 },
-    // Outer ring
     { x: 259, z: 9, axis: "x", min: 210, max: 300 },
     { x: -259, z: -9, axis: "x", min: -300, max: -210 },
     { x: 9, z: -280, axis: "z", min: -330, max: -240 },
@@ -107,7 +65,6 @@ export function createPedestrians(
     { x: -159, z: -150, axis: "z", min: -190, max: -110 },
     { x: 200, z: 59, axis: "x", min: 160, max: 240 },
     { x: -200, z: -59, axis: "x", min: -240, max: -160 },
-    // Extra scattered
     { x: 309, z: -40, axis: "z", min: -80, max: 0 },
     { x: -309, z: 40, axis: "z", min: 0, max: 80 },
     { x: 9, z: 330, axis: "z", min: 290, max: 370 },
@@ -120,91 +77,50 @@ export function createPedestrians(
     { x: -250, z: 150, axis: "z", min: 110, max: 190 },
   ];
 
-  // ============ CREATE PEDESTRIAN MESH ============
   function createPedestrianMesh(
     index: number,
     data: SpawnData,
-  ): PedestrianMesh {
-    const root = new TransformNode("ped_" + index, scene);
-    root.position = new Vector3(data.x, 0.15, data.z);
-
-    // Pick from shared material pools
-    const skinMat = skinMats[Math.floor(Math.random() * skinMats.length)];
-    const shirtMat = shirtMats[Math.floor(Math.random() * shirtMats.length)];
-    const pantsMat = pantsMats[Math.floor(Math.random() * pantsMats.length)];
-
-    const head = MeshBuilder.CreateSphere(
-      "pedHead_" + index,
-      { diameter: 0.32, segments: 8 },
+  ): { mesh: PedestrianMesh; anim: CharacterAnimationController } {
+    // Create procedural character with random colors for variety
+    const colors = randomPedestrianColors();
+    const { root, animController } = createProceduralCharacter(
       scene,
+      shadowGenerator,
+      colors,
     );
-    head.position.y = 1.56;
-    head.parent = root;
-    head.material = skinMat;
 
-    const torso = MeshBuilder.CreateBox(
-      "pedTorso_" + index,
-      { width: 0.45, height: 0.6, depth: 0.25 },
-      scene,
-    );
-    torso.position.y = 1.1;
-    torso.parent = root;
-    torso.material = shirtMat;
+    root.name = `ped_${index}`;
+    root.position = new Vector3(data.x, 0, data.z);
 
-    const leftLeg = MeshBuilder.CreateBox(
-      "pedLL_" + index,
-      { width: 0.16, height: 0.7, depth: 0.16 },
-      scene,
-    );
-    leftLeg.position.set(-0.12, 0.45, 0);
-    leftLeg.parent = root;
-    leftLeg.material = pantsMat;
-
-    const rightLeg = MeshBuilder.CreateBox(
-      "pedRL_" + index,
-      { width: 0.16, height: 0.7, depth: 0.16 },
-      scene,
-    );
-    rightLeg.position.set(0.12, 0.45, 0);
-    rightLeg.parent = root;
-    rightLeg.material = pantsMat;
-
-    const leftArm = MeshBuilder.CreateBox(
-      "pedLA_" + index,
-      { width: 0.13, height: 0.5, depth: 0.13 },
-      scene,
-    );
-    leftArm.position.set(-0.33, 1.05, 0);
-    leftArm.parent = root;
-    leftArm.material = shirtMat;
-
-    const rightArm = MeshBuilder.CreateBox(
-      "pedRA_" + index,
-      { width: 0.13, height: 0.5, depth: 0.13 },
-      scene,
-    );
-    rightArm.position.set(0.33, 1.05, 0);
-    rightArm.parent = root;
-    rightArm.material = shirtMat;
-
-    // Only add torso as shadow caster (skip head — saves draw calls)
-    shadowGenerator.addShadowCaster(torso);
+    // Random height variation
+    const scale = 0.85 + Math.random() * 0.2;
+    root.scaling.setAll(scale);
 
     if (data.axis === "x") {
       root.rotation.y = Math.PI / 2;
     }
 
-    return { root, head, torso, leftLeg, rightLeg, leftArm, rightArm };
+    playLoop(
+      animController,
+      animController.clips.idle ?? animController.clips.walk,
+      1,
+    );
+
+    return {
+      mesh: placeholderPedMesh(root),
+      anim: animController,
+    };
   }
 
-  // ============ SPAWN ALL PEDESTRIANS ============
+  const created = spawnData.map((data, i) => createPedestrianMesh(i, data));
+
   spawnData.forEach((data, i) => {
-    const mesh = createPedestrianMesh(i, data);
+    const createdPed = created[i];
     const speed = 1.5 + Math.random() * 1.5;
     const direction = Math.random() > 0.5 ? 1 : -1;
 
-    pedestrians.push({
-      mesh,
+    const ped: Pedestrian = {
+      mesh: createdPed.mesh,
       speed,
       direction,
       axis: data.axis,
@@ -218,14 +134,59 @@ export function createPedestrians(
       flying: false,
       flyVelocity: new Vector3(0, 0, 0),
       flyTime: 0,
-    });
+      fleeing: false,
+      fleeTimer: 0,
+      fleeX: 0,
+      fleeZ: 0,
+    };
+
+    pedestrians.push(ped);
+    pedAnimations.set(ped, createdPed.anim);
   });
 
-  // ============ UPDATE FUNCTION ============
+  function startFlee(
+    ped: Pedestrian,
+    pedX: number,
+    pedZ: number,
+    dangerX: number,
+    dangerZ: number,
+  ): void {
+    ped.fleeing = true;
+    ped.fleeTimer = FLEE_DURATION;
+    const dx = pedX - dangerX;
+    const dz = pedZ - dangerZ;
+    const dist = Math.sqrt(dx * dx + dz * dz) || 1;
+    ped.fleeX = dx / dist + (Math.random() - 0.5) * 0.5;
+    ped.fleeZ = dz / dist + (Math.random() - 0.5) * 0.5;
+    const fLen = Math.sqrt(ped.fleeX * ped.fleeX + ped.fleeZ * ped.fleeZ) || 1;
+    ped.fleeX /= fLen;
+    ped.fleeZ /= fLen;
+  }
+
+  const FLEE_DETECT_DIST = 12;
+  const FLEE_SPEED = 5;
+  const FLEE_DURATION = 2.5;
+
+  let getTrafficPositions:
+    | (() => { x: number; z: number; speed: number; rotY: number }[])
+    | null = null;
+
   function updatePedestrians(dt: number): void {
+    const carX = carRoot.position.x;
+    const carZ = carRoot.position.z;
+
     pedestrians.forEach((ped) => {
-      // --- FLYING (death animation) ---
+      const anim = pedAnimations.get(ped);
+      if (!anim) {
+        return;
+      }
+
       if (ped.flying) {
+        if (!hadFlyingState.has(ped)) {
+          hadFlyingState.add(ped);
+          playOneShot(anim, anim.clips.deathOrHit ?? anim.clips.attack, 1);
+        }
+
         ped.flyTime += dt;
         ped.flyVelocity.y -= 9.81 * dt;
         ped.mesh.root.position.addInPlace(ped.flyVelocity.scale(dt));
@@ -241,24 +202,73 @@ export function createPedestrians(
         return;
       }
 
-      // --- DEAD, WAITING TO RESPAWN ---
       if (!ped.alive) {
         ped.respawnTimer -= dt;
         if (ped.respawnTimer <= 0) {
           ped.alive = true;
-          ped.mesh.root.position.set(ped.spawnX, 0.15, ped.spawnZ);
+          ped.fleeing = false;
+          ped.fleeTimer = 0;
+          hadFlyingState.delete(ped);
+          ped.mesh.root.position.set(ped.spawnX, 0, ped.spawnZ);
           ped.mesh.root.rotation.set(0, ped.axis === "x" ? Math.PI / 2 : 0, 0);
           ped.mesh.root.setEnabled(true);
           ped.direction = Math.random() > 0.5 ? 1 : -1;
-          ped.mesh.leftLeg.rotation.x = 0;
-          ped.mesh.rightLeg.rotation.x = 0;
-          ped.mesh.leftArm.rotation.x = 0;
-          ped.mesh.rightArm.rotation.x = 0;
+          playLoop(anim, anim.clips.idle ?? anim.clips.walk, 1);
         }
         return;
       }
 
-      // --- ALIVE: WALK ALONG PATROL PATH ---
+      const pedX = ped.mesh.root.position.x;
+      const pedZ = ped.mesh.root.position.z;
+
+      if (!ped.fleeing) {
+        const dxC = pedX - carX;
+        const dzC = pedZ - carZ;
+        const distSqC = dxC * dxC + dzC * dzC;
+
+        if (distSqC < FLEE_DETECT_DIST * FLEE_DETECT_DIST && distSqC < 64) {
+          startFlee(ped, pedX, pedZ, carX, carZ);
+        }
+
+        if (!ped.fleeing && getTrafficPositions) {
+          const trafficList = getTrafficPositions();
+          for (let t = 0; t < trafficList.length; t++) {
+            const tc = trafficList[t];
+            if (tc.speed < 5) continue;
+            const dxT = pedX - tc.x;
+            const dzT = pedZ - tc.z;
+            const distSqT = dxT * dxT + dzT * dzT;
+            if (distSqT < 64) {
+              startFlee(ped, pedX, pedZ, tc.x, tc.z);
+              break;
+            }
+          }
+        }
+      }
+
+      if (ped.fleeing) {
+        ped.fleeTimer -= dt;
+        if (ped.fleeTimer <= 0) {
+          ped.fleeing = false;
+        } else {
+          ped.mesh.root.position.x += ped.fleeX * FLEE_SPEED * dt;
+          ped.mesh.root.position.z += ped.fleeZ * FLEE_SPEED * dt;
+
+          ped.mesh.root.position.x = Math.max(
+            -395,
+            Math.min(395, ped.mesh.root.position.x),
+          );
+          ped.mesh.root.position.z = Math.max(
+            -395,
+            Math.min(395, ped.mesh.root.position.z),
+          );
+
+          ped.mesh.root.rotation.y = Math.atan2(ped.fleeX, ped.fleeZ);
+          playLoop(anim, anim.clips.run ?? anim.clips.walk, 1.15);
+          return;
+        }
+      }
+
       const moveAmount = ped.speed * ped.direction * dt;
 
       if (ped.axis === "z") {
@@ -285,21 +295,26 @@ export function createPedestrians(
         }
       }
 
-      // Walking animation — only for nearby peds (distance culling)
       const dx = ped.mesh.root.position.x - carRoot.position.x;
       const dz = ped.mesh.root.position.z - carRoot.position.z;
       const distSq = dx * dx + dz * dz;
       if (distSq < 10000) {
-        // 100 * 100
-        ped.walkPhase += dt * ped.speed * 4;
-        const swing = Math.sin(ped.walkPhase) * 0.4;
-        ped.mesh.leftLeg.rotation.x = swing;
-        ped.mesh.rightLeg.rotation.x = -swing;
-        ped.mesh.leftArm.rotation.x = -swing * 0.8;
-        ped.mesh.rightArm.rotation.x = swing * 0.8;
+        playLoop(
+          anim,
+          anim.clips.walk ?? anim.clips.idle,
+          Math.max(0.7, ped.speed / 2),
+        );
       }
     });
   }
 
-  return { pedestrians, updatePedestrians };
+  return {
+    pedestrians,
+    updatePedestrians,
+    setTrafficGetter: (
+      getter: () => { x: number; z: number; speed: number; rotY: number }[],
+    ) => {
+      getTrafficPositions = getter;
+    },
+  };
 }

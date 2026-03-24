@@ -9,6 +9,8 @@ import type {
   CollisionCallbacks,
   CollisionResult,
   PoliceResult,
+  PlayerMode,
+  TrafficCarData,
 } from "./types";
 
 /* ================================================================
@@ -70,7 +72,10 @@ export function setupCollisions(
   policeResult: PoliceResult,
   treeData: TreeData[],
   parkedCars: ParkedCarData[],
-): CollisionResult {
+): CollisionResult & {
+  checkOnFootCollisions: (playerMesh: Mesh, mode: PlayerMode) => void;
+  setTrafficGetter: (getter: () => TrafficCarData[]) => void;
+} {
   const carHalfW = 1.1;
   const carHalfD = 2.25;
   const policeHalfW = 1.0;
@@ -81,6 +86,11 @@ export function setupCollisions(
   let hitCount = 0;
   let collisionCooldown = 0;
   let policeCooldown = 0;
+  let trafficCooldown = 0;
+
+  let getTrafficCars: (() => TrafficCarData[]) | null = null;
+  const trafficHalfW = 1.0;
+  const trafficHalfD = 2.0;
 
   // Build spatial grids for static objects
   const buildingGrid = createSpatialGrid(
@@ -98,6 +108,30 @@ export function setupCollisions(
     (p) => p.x,
     (p) => p.z,
   );
+
+  // ===== DYNAMIC PEDESTRIAN GRID - Updated each frame =====
+  const pedestrianGrid: SpatialGrid<Pedestrian> = {
+    cells: new Map(),
+    cellSize: CELL_SIZE,
+  };
+
+  function updatePedestrianGrid(): void {
+    pedestrianGrid.cells.clear();
+    for (const ped of pedestrians) {
+      if (!ped.alive || ped.flying) continue;
+      const x = ped.mesh.root.position.x;
+      const z = ped.mesh.root.position.z;
+      const cx = Math.floor(x / CELL_SIZE);
+      const cz = Math.floor(z / CELL_SIZE);
+      const key = `${cx}_${cz}`;
+      let bucket = pedestrianGrid.cells.get(key);
+      if (!bucket) {
+        bucket = [];
+        pedestrianGrid.cells.set(key, bucket);
+      }
+      bucket.push(ped);
+    }
+  }
 
   interface AABB {
     minX: number;
@@ -152,6 +186,10 @@ export function setupCollisions(
   function checkCollisions(dt: number): void {
     if (collisionCooldown > 0) collisionCooldown -= dt;
     if (policeCooldown > 0) policeCooldown -= dt;
+    if (trafficCooldown > 0) trafficCooldown -= dt;
+
+    // Update pedestrian spatial grid once per frame
+    updatePedestrianGrid();
 
     const carAABB = getCarAABB();
     const carSpeed = callbacks.getSpeed();
@@ -190,6 +228,12 @@ export function setupCollisions(
           const contactZ = Math.max(carAABB.minZ, bMinZ) + overlapZ / 2;
           callbacks.onBuildingHit(new Vector3(contactX, 0.8, contactZ));
           collisionCooldown = 0.5;
+          // High-speed collision damage
+          if (absSpeed > 15) {
+            const dmg = Math.min(30, (absSpeed - 15) * 0.8);
+            callbacks.onVehicleDamage(dmg);
+            callbacks.onPlayerDamage(dmg * 0.3);
+          }
         }
         callbacks.setSpeed(0);
       }
@@ -258,10 +302,11 @@ export function setupCollisions(
     }
 
     // ======================================================
-    // === PLAYER vs PEDESTRIANS ===
+    // === PLAYER vs PEDESTRIANS (spatial grid) ===
     // ======================================================
-    for (let j = 0; j < pedestrians.length; j++) {
-      const ped = pedestrians[j];
+    const nearPeds = queryGrid(pedestrianGrid, px, pz);
+    for (let j = 0; j < nearPeds.length; j++) {
+      const ped = nearPeds[j];
       if (!ped.alive || ped.flying) continue;
 
       const pedX = ped.mesh.root.position.x;
@@ -455,6 +500,9 @@ export function setupCollisions(
           );
           callbacks.onPoliceHit(contactPos);
           policeCooldown = 0.5;
+          // Police ram damage
+          callbacks.onVehicleDamage(5);
+          callbacks.onPlayerDamage(3);
         }
       }
 
@@ -500,9 +548,14 @@ export function setupCollisions(
         }
       }
 
-      // POLICE vs PEDESTRIANS
-      for (let pj = 0; pj < pedestrians.length; pj++) {
-        const ped = pedestrians[pj];
+      // POLICE vs PEDESTRIANS (spatial grid)
+      const nearPolicePeds = queryGrid(
+        pedestrianGrid,
+        pUnit.root.position.x,
+        pUnit.root.position.z,
+      );
+      for (let pj = 0; pj < nearPolicePeds.length; pj++) {
+        const ped = nearPolicePeds[pj];
         if (!ped.alive || ped.flying) continue;
 
         const pedX = ped.mesh.root.position.x;
@@ -627,7 +680,312 @@ export function setupCollisions(
         }
       }
     }
+
+    // ======================================================
+    // === TRAFFIC CAR COLLISIONS ===
+    // ======================================================
+    if (getTrafficCars) {
+      const trafficList = getTrafficCars();
+
+      for (let ti = 0; ti < trafficList.length; ti++) {
+        const tc = trafficList[ti];
+        if (!tc.active) continue;
+
+        const tcAABB = getOrientedAABB(
+          tc.root.position.x,
+          tc.root.position.z,
+          tc.root.rotation.y,
+          trafficHalfW,
+          trafficHalfD,
+        );
+
+        // PLAYER CAR vs TRAFFIC CAR
+        const ptOverlap = getOverlap(carAABB, tcAABB);
+        if (ptOverlap) {
+          const { overlapX, overlapZ } = ptOverlap;
+          const sx = tc.root.position.x - carRoot.position.x;
+          const sz = tc.root.position.z - carRoot.position.z;
+
+          // Push apart
+          if (overlapX < overlapZ) {
+            const sign = sx >= 0 ? 1 : -1;
+            carRoot.position.x -= sign * overlapX * 0.4;
+            tc.root.position.x += sign * overlapX * 0.6;
+          } else {
+            const sign = sz >= 0 ? 1 : -1;
+            carRoot.position.z -= sign * overlapZ * 0.4;
+            tc.root.position.z += sign * overlapZ * 0.6;
+          }
+
+          // Slow both
+          callbacks.setSpeed(carSpeed * 0.4);
+          tc.speed *= 0.2;
+
+          if (trafficCooldown <= 0) {
+            const contactPos = new Vector3(
+              (carRoot.position.x + tc.root.position.x) * 0.5,
+              0.8,
+              (carRoot.position.z + tc.root.position.z) * 0.5,
+            );
+            callbacks.triggerCollisionSparks(contactPos);
+            trafficCooldown = 0.4;
+
+            // Damage on high-speed impact
+            if (absSpeed > 10) {
+              const dmg = Math.min(25, (absSpeed - 10) * 0.7);
+              callbacks.onVehicleDamage(dmg);
+              callbacks.onPlayerDamage(dmg * 0.2);
+            }
+          }
+        }
+
+        // TRAFFIC vs PEDESTRIANS (spatial grid)
+        const nearTrafficPeds = queryGrid(
+          pedestrianGrid,
+          tc.root.position.x,
+          tc.root.position.z,
+        );
+        for (let pj = 0; pj < nearTrafficPeds.length; pj++) {
+          const ped = nearTrafficPeds[pj];
+          if (!ped.alive || ped.flying) continue;
+
+          const pedX = ped.mesh.root.position.x;
+          const pedZ = ped.mesh.root.position.z;
+          const pedAABB: AABB = {
+            minX: pedX - pedHalf,
+            maxX: pedX + pedHalf,
+            minZ: pedZ - pedHalf,
+            maxZ: pedZ + pedHalf,
+          };
+
+          const tpOverlap = getOverlap(tcAABB, pedAABB);
+          if (tpOverlap && tc.speed > 2) {
+            ped.alive = false;
+            ped.flying = true;
+            ped.flyTime = 0;
+
+            const tfwd = forwardDir(tc.root.rotation.y);
+            const launchSpeed = Math.min(tc.speed * 0.6, 15);
+            ped.flyVelocity = new Vector3(
+              tfwd.x * launchSpeed + (Math.random() - 0.5) * 3,
+              6 + Math.random() * 4,
+              tfwd.z * launchSpeed + (Math.random() - 0.5) * 3,
+            );
+
+            callbacks.triggerHitParticles(ped.mesh.root.position.clone());
+          }
+        }
+
+        // TRAFFIC vs BUILDINGS (spatial grid — push back)
+        const nearTrafficBldgs = queryGrid(
+          buildingGrid,
+          tc.root.position.x,
+          tc.root.position.z,
+        );
+        for (let bi = 0; bi < nearTrafficBldgs.length; bi++) {
+          const b = nearTrafficBldgs[bi];
+          const bAABB: AABB = {
+            minX: b.x - b.w / 2,
+            maxX: b.x + b.w / 2,
+            minZ: b.z - b.d / 2,
+            maxZ: b.z + b.d / 2,
+          };
+
+          const tbOverlap = getOverlap(tcAABB, bAABB);
+          if (tbOverlap) {
+            const { overlapX, overlapZ } = tbOverlap;
+            if (overlapX < overlapZ) {
+              tc.root.position.x +=
+                tc.root.position.x < b.x ? -overlapX : overlapX;
+            } else {
+              tc.root.position.z +=
+                tc.root.position.z < b.z ? -overlapZ : overlapZ;
+            }
+            tc.speed *= 0.3;
+          }
+        }
+
+        // TRAFFIC vs TREES (spatial grid)
+        const nearTrafficTrees = queryGrid(
+          treeGrid,
+          tc.root.position.x,
+          tc.root.position.z,
+        );
+        for (let tti = 0; tti < nearTrafficTrees.length; tti++) {
+          const tree = nearTrafficTrees[tti];
+          const treeAABB: AABB = {
+            minX: tree.x - treeHalf,
+            maxX: tree.x + treeHalf,
+            minZ: tree.z - treeHalf,
+            maxZ: tree.z + treeHalf,
+          };
+
+          const ttOverlap = getOverlap(tcAABB, treeAABB);
+          if (ttOverlap) {
+            const { overlapX, overlapZ } = ttOverlap;
+            if (overlapX < overlapZ) {
+              tc.root.position.x +=
+                tc.root.position.x < tree.x ? -overlapX : overlapX;
+            } else {
+              tc.root.position.z +=
+                tc.root.position.z < tree.z ? -overlapZ : overlapZ;
+            }
+            tc.speed *= 0.5;
+          }
+        }
+
+        // TRAFFIC vs PARKED CARS (spatial grid)
+        const nearTrafficParked = queryGrid(
+          parkedCarGrid,
+          tc.root.position.x,
+          tc.root.position.z,
+        );
+        for (let tpi = 0; tpi < nearTrafficParked.length; tpi++) {
+          const pc = nearTrafficParked[tpi];
+          const pcAABB = getOrientedAABB(
+            pc.x,
+            pc.z,
+            pc.rotY,
+            pc.halfW,
+            pc.halfD,
+          );
+          const tpcOverlap = getOverlap(tcAABB, pcAABB);
+          if (tpcOverlap) {
+            const { overlapX, overlapZ } = tpcOverlap;
+            if (overlapX < overlapZ) {
+              tc.root.position.x +=
+                tc.root.position.x < pc.x ? -overlapX : overlapX;
+            } else {
+              tc.root.position.z +=
+                tc.root.position.z < pc.z ? -overlapZ : overlapZ;
+            }
+            tc.speed *= 0.3;
+          }
+        }
+      }
+    }
   }
 
-  return { checkCollisions };
+  // ======================================================
+  // === ON-FOOT PLAYER COLLISION (circle vs AABB) ===
+  // ======================================================
+  const PLAYER_RADIUS = 0.4;
+
+  function checkOnFootCollisions(playerMesh: Mesh, mode: PlayerMode): void {
+    if (mode !== "on-foot") return;
+
+    const px = playerMesh.position.x;
+    const pz = playerMesh.position.z;
+
+    // Player vs Buildings
+    const nearBldgs = queryGrid(buildingGrid, px, pz);
+    for (let i = 0; i < nearBldgs.length; i++) {
+      const b = nearBldgs[i];
+      // Closest point on building AABB to player
+      const closestX = Math.max(b.x - b.w / 2, Math.min(px, b.x + b.w / 2));
+      const closestZ = Math.max(b.z - b.d / 2, Math.min(pz, b.z + b.d / 2));
+      const dx = px - closestX;
+      const dz = pz - closestZ;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq < PLAYER_RADIUS * PLAYER_RADIUS && distSq > 0.0001) {
+        const dist = Math.sqrt(distSq);
+        const push = PLAYER_RADIUS - dist;
+        playerMesh.position.x += (dx / dist) * push;
+        playerMesh.position.z += (dz / dist) * push;
+      }
+    }
+
+    // Player vs Trees
+    const nearTr = queryGrid(treeGrid, px, pz);
+    for (let i = 0; i < nearTr.length; i++) {
+      const t = nearTr[i];
+      const dx = px - t.x;
+      const dz = pz - t.z;
+      const distSq = dx * dx + dz * dz;
+      const minDist = PLAYER_RADIUS + treeHalf;
+
+      if (distSq < minDist * minDist && distSq > 0.0001) {
+        const dist = Math.sqrt(distSq);
+        const push = minDist - dist;
+        playerMesh.position.x += (dx / dist) * push;
+        playerMesh.position.z += (dz / dist) * push;
+      }
+    }
+
+    // Player vs Parked Cars
+    const nearPC = queryGrid(parkedCarGrid, px, pz);
+    for (let i = 0; i < nearPC.length; i++) {
+      const pc = nearPC[i];
+      const pcAABB = getOrientedAABB(pc.x, pc.z, pc.rotY, pc.halfW, pc.halfD);
+      const closestX = Math.max(pcAABB.minX, Math.min(px, pcAABB.maxX));
+      const closestZ = Math.max(pcAABB.minZ, Math.min(pz, pcAABB.maxZ));
+      const dx = px - closestX;
+      const dz = pz - closestZ;
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq < PLAYER_RADIUS * PLAYER_RADIUS && distSq > 0.0001) {
+        const dist = Math.sqrt(distSq);
+        const push = PLAYER_RADIUS - dist;
+        playerMesh.position.x += (dx / dist) * push;
+        playerMesh.position.z += (dz / dist) * push;
+      }
+    }
+
+    // Player vs Traffic Cars (on foot — can get hit!)
+    if (getTrafficCars) {
+      const trafficList = getTrafficCars();
+      for (let i = 0; i < trafficList.length; i++) {
+        const tc = trafficList[i];
+        if (!tc.active) continue;
+
+        const tcAABB = getOrientedAABB(
+          tc.root.position.x,
+          tc.root.position.z,
+          tc.root.rotation.y,
+          trafficHalfW,
+          trafficHalfD,
+        );
+        const closestX = Math.max(tcAABB.minX, Math.min(px, tcAABB.maxX));
+        const closestZ = Math.max(tcAABB.minZ, Math.min(pz, tcAABB.maxZ));
+        const dx = px - closestX;
+        const dz = pz - closestZ;
+        const distSq = dx * dx + dz * dz;
+
+        if (distSq < PLAYER_RADIUS * PLAYER_RADIUS && distSq > 0.0001) {
+          const dist = Math.sqrt(distSq);
+          const push = PLAYER_RADIUS - dist + 0.3;
+          playerMesh.position.x += (dx / dist) * push;
+          playerMesh.position.z += (dz / dist) * push;
+
+          // Getting hit by a traffic car hurts!
+          if (tc.speed > 3) {
+            const dmg = Math.min(40, tc.speed * 1.5);
+            callbacks.onPlayerDamage(dmg);
+            callbacks.triggerHitParticles(playerMesh.position.clone());
+            tc.speed *= 0.5;
+          }
+        }
+      }
+    }
+
+    // World boundary
+    const limit = 395;
+    playerMesh.position.x = Math.max(
+      -limit,
+      Math.min(limit, playerMesh.position.x),
+    );
+    playerMesh.position.z = Math.max(
+      -limit,
+      Math.min(limit, playerMesh.position.z),
+    );
+  }
+
+  return {
+    checkCollisions,
+    checkOnFootCollisions,
+    setTrafficGetter: (getter: () => TrafficCarData[]) => {
+      getTrafficCars = getter;
+    },
+  };
 }
