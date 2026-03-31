@@ -16,7 +16,7 @@ export function setupParticles(scene: Scene, carRoot: Mesh): ParticlesResult {
     xOffset: number,
     name: string,
   ): ParticleSystem {
-    const exhaust = new ParticleSystem(name, 150, scene);
+    const exhaust = new ParticleSystem(name, 75, scene);
     exhaust.particleTexture = new Texture("/textures/flare.png", scene);
 
     const emitter = MeshBuilder.CreateBox(
@@ -71,7 +71,7 @@ export function setupParticles(scene: Scene, carRoot: Mesh): ParticlesResult {
   ];
 
   wheelOffsets.forEach((w) => {
-    const dust = new ParticleSystem(w.name, 100, scene);
+    const dust = new ParticleSystem(w.name, 50, scene);
     dust.particleTexture = new Texture("/textures/flare.png", scene);
 
     const emitter = MeshBuilder.CreateBox(
@@ -114,7 +114,7 @@ export function setupParticles(scene: Scene, carRoot: Mesh): ParticlesResult {
   // ============ UPDATE FUNCTION ============
   function updateParticles(keys: Keys, speed: number): void {
     const isAccelerating = keys["w"] || keys["arrowup"];
-    const targetExhaustRate = isAccelerating ? 60 : speed > 2 ? 15 : 5;
+    const targetExhaustRate = isAccelerating ? 30 : speed > 2 ? 8 : 3;
     exhaustL.emitRate = targetExhaustRate;
     exhaustR.emitRate = targetExhaustRate;
 
@@ -133,7 +133,7 @@ export function setupParticles(scene: Scene, carRoot: Mesh): ParticlesResult {
   }
 
   // ============ COLLISION SPARKS ============
-  const collisionSparks = new ParticleSystem("collisionSparks", 200, scene);
+  const collisionSparks = new ParticleSystem("collisionSparks", 100, scene);
   collisionSparks.particleTexture = new Texture("/textures/flare.png", scene);
 
   const sparkEmitter = MeshBuilder.CreateBox(
@@ -170,15 +170,15 @@ export function setupParticles(scene: Scene, carRoot: Mesh): ParticlesResult {
 
   function triggerCollisionSparks(position: Vector3): void {
     sparkEmitter.position.copyFrom(position);
-    collisionSparks.emitRate = 300;
-    collisionSparks.manualEmitCount = 60;
+    collisionSparks.emitRate = 150;
+    collisionSparks.manualEmitCount = 30;
     setTimeout(() => {
       collisionSparks.emitRate = 0;
     }, 150);
   }
 
   // ============ PEDESTRIAN HIT PARTICLES ============
-  const hitBurst = new ParticleSystem("hitBurst", 150, scene);
+  const hitBurst = new ParticleSystem("hitBurst", 75, scene);
   hitBurst.particleTexture = new Texture("/textures/flare.png", scene);
 
   const hitEmitter = MeshBuilder.CreateBox(
@@ -215,8 +215,8 @@ export function setupParticles(scene: Scene, carRoot: Mesh): ParticlesResult {
 
   function triggerHitParticles(position: Vector3): void {
     hitEmitter.position.copyFrom(position);
-    hitBurst.emitRate = 250;
-    hitBurst.manualEmitCount = 50;
+    hitBurst.emitRate = 120;
+    hitBurst.manualEmitCount = 25;
     setTimeout(() => {
       hitBurst.emitRate = 0;
     }, 200);

@@ -1,64 +1,93 @@
 import type { MissionDef } from "./types";
 
 /* ================================================================
- *  MISSION DEFINITIONS — all story + side missions
+ *  STORY MODE — 5 linear missions, GTA-style progression
+ *  Each mission unlocks the next. Complete all 5 to finish the story.
  * ================================================================ */
 
+export const STORY_MISSION_IDS = [
+  "story_1_race",
+  "story_2_delivery",
+  "story_3_hit",
+  "story_4_chase",
+  "story_5_heist",
+] as const;
+
 export const missionDefs: MissionDef[] = [
-  // ── STORY MISSIONS ──
+  // ═══════════════════════════════════════════════════════════
+  // MISSION 1: "Prove Yourself" — Street race through downtown
+  // ═══════════════════════════════════════════════════════════
   {
-    id: "intro_drive",
-    title: "First Wheels",
-    description: "Drive to the marked location downtown.",
-    type: "go-to",
+    id: "story_1_race",
+    title: "Prove Yourself",
+    description:
+      "Vinnie wants to see what you can do. Win this street race through downtown checkpoints.",
+    type: "race",
     giverId: "vinnie",
     steps: [
       {
-        type: "go-to",
-        description: "Drive to the garage on Main Street",
-        targetX: 50,
-        targetZ: 50,
+        type: "race",
+        description: "Race through all checkpoints!",
+        targets: [
+          { x: 50, z: 0 },
+          { x: 100, z: -50 },
+          { x: 150, z: 0 },
+          { x: 150, z: 100 },
+          { x: 100, z: 150 },
+          { x: 50, z: 100 },
+        ],
+        timeLimit: 120,
       },
     ],
-    reward: { money: 200 },
+    reward: { money: 500 },
     requiredMissions: [],
     repeatable: false,
   },
+
+  // ═══════════════════════════════════════════════════════════
+  // MISSION 2: "Hot Delivery" — Timed package delivery
+  // ═══════════════════════════════════════════════════════════
   {
-    id: "hot_delivery",
+    id: "story_2_delivery",
     title: "Hot Delivery",
-    description: "Deliver the package before time runs out!",
+    description:
+      "A package needs to get across the city fast. Pick it up and deliver it — no delays!",
     type: "delivery",
     giverId: "vinnie",
     steps: [
       {
         type: "go-to",
-        description: "Pick up the package",
+        description: "Drive to the pickup point",
         targetX: -100,
         targetZ: 50,
       },
       {
         type: "go-to",
-        description: "Deliver to the drop-off — HURRY!",
+        description: "Deliver the package — HURRY!",
         targetX: 200,
-        targetZ: -100,
-        timeLimit: 60,
+        targetZ: -150,
+        timeLimit: 75,
       },
     ],
-    reward: { money: 500 },
-    requiredMissions: ["intro_drive"],
+    reward: { money: 800, weapon: "bat" },
+    requiredMissions: ["story_1_race"],
     repeatable: false,
   },
+
+  // ═══════════════════════════════════════════════════════════
+  // MISSION 3: "Clean the Streets" — Kill targets on foot
+  // ═══════════════════════════════════════════════════════════
   {
-    id: "gang_trouble",
-    title: "Gang Trouble",
-    description: "Take out the rival gang members.",
+    id: "story_3_hit",
+    title: "Clean the Streets",
+    description:
+      "Tony needs you to deal with some troublemakers. Get out of the car and handle business.",
     type: "kill",
     giverId: "tony",
     steps: [
       {
         type: "go-to",
-        description: "Head to the gang territory",
+        description: "Drive to the gang territory",
         targetX: -200,
         targetZ: -200,
       },
@@ -69,206 +98,102 @@ export const missionDefs: MissionDef[] = [
         targetZ: -200,
         count: 3,
       },
-    ],
-    reward: { money: 800, weapon: "shotgun" },
-    requiredMissions: ["hot_delivery"],
-    repeatable: false,
-  },
-  {
-    id: "street_race_1",
-    title: "Street Race: Downtown",
-    description: "Win the downtown race through checkpoints.",
-    type: "race",
-    giverId: "racer",
-    steps: [
       {
-        type: "race",
-        description: "Race through all checkpoints!",
-        targets: [
-          { x: 0, z: 0 },
-          { x: 50, z: -50 },
-          { x: 100, z: 0 },
-          { x: 100, z: 100 },
-          { x: 50, z: 150 },
-          { x: 0, z: 100 },
-        ],
+        type: "go-to",
+        description: "Get back to safety — drive to the safehouse!",
+        targetX: 0,
+        targetZ: 0,
         timeLimit: 90,
       },
     ],
-    reward: { money: 600 },
-    requiredMissions: [],
-    repeatable: true,
+    reward: { money: 1200, weapon: "pistol" },
+    requiredMissions: ["story_2_delivery"],
+    repeatable: false,
   },
+
+  // ═══════════════════════════════════════════════════════════
+  // MISSION 4: "The Snitch" — Chase + escape the heat
+  // ═══════════════════════════════════════════════════════════
   {
-    id: "chase_the_snitch",
-    title: "Chase the Snitch",
-    description: "Chase down the informant before he escapes.",
+    id: "story_4_chase",
+    title: "The Snitch",
+    description:
+      "An informant is about to rat us out to the cops. Chase him down before he escapes, then lay low.",
     type: "chase",
     giverId: "tony",
     steps: [
       {
         type: "go-to",
-        description: "Find the snitch near the park",
+        description: "Head to the informant's last known location",
         targetX: 150,
-        targetZ: 50,
+        targetZ: 100,
       },
       {
-        type: "chase",
-        description: "Chase him down!",
+        type: "go-to",
+        description: "Chase the snitch — he's running!",
         targetX: 300,
-        targetZ: -150,
-        timeLimit: 45,
+        targetZ: -200,
+        timeLimit: 50,
+      },
+      {
+        type: "go-to",
+        description: "Lose the heat — get to the hideout!",
+        targetX: -150,
+        targetZ: 200,
+        timeLimit: 70,
       },
     ],
-    reward: { money: 700 },
-    requiredMissions: ["gang_trouble"],
+    reward: { money: 1500, weapon: "shotgun" },
+    requiredMissions: ["story_3_hit"],
     repeatable: false,
   },
+
+  // ═══════════════════════════════════════════════════════════
+  // MISSION 5: "The Big Score" — Multi-stage warehouse heist
+  // ═══════════════════════════════════════════════════════════
   {
-    id: "big_heist",
-    title: "The Big Heist",
-    description: "Rob the warehouse and escape the cops.",
+    id: "story_5_heist",
+    title: "The Big Score",
+    description:
+      "This is the big one. Hit the warehouse, grab the loot, and escape the entire police force.",
     type: "collect",
     giverId: "vinnie",
     steps: [
       {
         type: "go-to",
-        description: "Drive to the warehouse",
+        description: "Drive to the warehouse on the west side",
         targetX: -250,
         targetZ: 100,
       },
       {
         type: "collect",
-        description: "Grab the loot crates",
+        description: "Grab the loot crates inside!",
         targets: [
-          { x: -250, z: 100 },
+          { x: -250, z: 95 },
           { x: -260, z: 110 },
-          { x: -240, z: 90 },
+          { x: -240, z: 105 },
         ],
         count: 3,
       },
       {
         type: "go-to",
-        description: "Escape to the safehouse!",
+        description: "ESCAPE! Get to the safehouse before the cops get you!",
         targetX: 0,
         targetZ: 0,
         timeLimit: 120,
       },
     ],
-    reward: { money: 2000, weapon: "smg" },
-    requiredMissions: ["chase_the_snitch"],
-    repeatable: false,
-  },
-
-  // ── SIDE MISSIONS ──
-  {
-    id: "taxi_run_1",
-    title: "Taxi Run",
-    description: "Pick up and drop off passengers for cash.",
-    type: "delivery",
-    giverId: "taxi_stand",
-    steps: [
-      {
-        type: "go-to",
-        description: "Pick up the passenger",
-        targetX: 50,
-        targetZ: -100,
-      },
-      {
-        type: "go-to",
-        description: "Drop off at the destination",
-        targetX: -150,
-        targetZ: 200,
-        timeLimit: 60,
-      },
-    ],
-    reward: { money: 300 },
-    requiredMissions: [],
-    repeatable: true,
-  },
-  {
-    id: "street_race_2",
-    title: "Street Race: Industrial",
-    description: "Win the industrial district race.",
-    type: "race",
-    giverId: "racer",
-    steps: [
-      {
-        type: "race",
-        description: "Race through the docks!",
-        targets: [
-          { x: -150, z: -100 },
-          { x: -200, z: -200 },
-          { x: -300, z: -150 },
-          { x: -250, z: -50 },
-          { x: -150, z: 0 },
-        ],
-        timeLimit: 75,
-      },
-    ],
-    reward: { money: 500 },
-    requiredMissions: ["street_race_1"],
-    repeatable: true,
-  },
-  {
-    id: "collect_packages",
-    title: "Hidden Packages",
-    description: "Find the hidden packages around the city.",
-    type: "collect",
-    giverId: "contact",
-    steps: [
-      {
-        type: "collect",
-        description: "Find all hidden packages",
-        targets: [
-          { x: 100, z: -200 },
-          { x: -100, z: 300 },
-          { x: 250, z: 150 },
-          { x: -300, z: -250 },
-          { x: 0, z: -350 },
-        ],
-        count: 5,
-      },
-    ],
-    reward: { money: 1000, weapon: "pistol" },
-    requiredMissions: [],
-    repeatable: false,
-  },
-  {
-    id: "escort_vip",
-    title: "VIP Escort",
-    description: "Escort the VIP safely to his destination.",
-    type: "escort",
-    giverId: "tony",
-    steps: [
-      {
-        type: "go-to",
-        description: "Pick up the VIP",
-        targetX: 100,
-        targetZ: 100,
-      },
-      {
-        type: "go-to",
-        description: "Drive the VIP to the airport",
-        targetX: -300,
-        targetZ: 300,
-        timeLimit: 90,
-      },
-    ],
-    reward: { money: 900 },
-    requiredMissions: ["intro_drive"],
+    reward: { money: 5000, weapon: "smg" },
+    requiredMissions: ["story_4_chase"],
     repeatable: false,
   },
 ];
 
-// Mission giver locations
+// Mission giver locations — placed on sidewalks near road intersections
 export const missionGivers: Record<
   string,
   { x: number; z: number; name: string }
 > = {
   vinnie: { x: 10, z: -30, name: "Vinnie" },
   tony: { x: -50, z: 50, name: "Tony" },
-  racer: { x: 100, z: -50, name: "Street Racer" },
-  taxi_stand: { x: 50, z: -100, name: "Taxi Stand" },
-  contact: { x: -100, z: -100, name: "Contact" },
 };

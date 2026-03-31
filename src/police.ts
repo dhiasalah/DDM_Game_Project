@@ -16,19 +16,50 @@ export function createPolice(
   buildingData: BuildingData[],
 ): PoliceResult {
   // ============ WANTED SYSTEM ============
-  let wantedHeat = 0; // Accumulates from ped hits / destruction
-  let wantedLevel = 0; // 0-5 stars
+  let wantedHeat = 0;
+  let wantedLevel = 0;
   const maxPoliceCars = 5;
-  let heatDecayCooldown = 0; // Seconds remaining before heat can start decaying
-  const HEAT_DECAY_COOLDOWN = 12; // Seconds after last crime before heat decays
-  const HEAT_DECAY_RATE = 0.08; // Heat lost per second (slow)
-  const MIN_CHASE_TIME = 20; // Minimum seconds a police car stays active
+  let heatDecayCooldown = 0;
+  const HEAT_DECAY_COOLDOWN = 12;
+  const HEAT_DECAY_RATE = 0.08;
+  const MIN_CHASE_TIME = 20;
 
   // ============ BUSTED SYSTEM ============
-  let bustedTimer = 0; // Accumulates when 2+ police near and player slow
-  const BUSTED_THRESHOLD = 4.0; // Seconds standing still near police to get busted
+  let bustedTimer = 0;
+  const BUSTED_THRESHOLD = 4.0;
   let onBusted: (() => void) | null = null;
   let bustedTriggered = false;
+
+  // ============ ROAD GRID (for road-aware AI) ============
+  // Roads are at every 50 units from -350 to 350
+  const ROAD_POSITIONS: number[] = [];
+  for (let v = -350; v <= 350; v += 50) {
+    ROAD_POSITIONS.push(v);
+  }
+  const ROAD_HALF = 7;
+
+  /** Find nearest road center position for a given coordinate */
+  function nearestRoadPos(val: number): number {
+    let best = ROAD_POSITIONS[0];
+    let bestDist = Math.abs(val - best);
+    for (let i = 1; i < ROAD_POSITIONS.length; i++) {
+      const d = Math.abs(val - ROAD_POSITIONS[i]);
+      if (d < bestDist) {
+        bestDist = d;
+        best = ROAD_POSITIONS[i];
+      }
+    }
+    return best;
+  }
+
+  /** Check if a position is on or near a road */
+  function isOnRoad(x: number, z: number): boolean {
+    for (const rp of ROAD_POSITIONS) {
+      if (Math.abs(x - rp) < ROAD_HALF) return true;
+      if (Math.abs(z - rp) < ROAD_HALF) return true;
+    }
+    return false;
+  }
 
   interface PoliceUnit {
     root: Mesh;
@@ -39,6 +70,10 @@ export function createPolice(
     active: boolean;
     steerAngle: number;
     activeTimer: number;
+    // Road-aware AI state
+    currentRoadAxis: "x" | "z" | null; // which road axis we're following
+    currentRoadPos: number; // the road position we're on
+    lastTurnTime: number; // prevent turning too frequently
   }
 
   const policeUnits: PoliceUnit[] = [];
@@ -69,7 +104,6 @@ export function createPolice(
   const sirenOffMat = new StandardMaterial("sirenOffMat", scene);
   sirenOffMat.diffuseColor = new Color3(0.2, 0.2, 0.2);
 
-  // Shared wheel material for all police cars
   const policeWheelMat = new StandardMaterial("policeWheelMat", scene);
   policeWheelMat.diffuseColor = new Color3(0.1, 0.1, 0.1);
   policeWheelMat.freeze();
@@ -85,7 +119,6 @@ export function createPolice(
     body.material = policeBodyMat;
     body.isVisible = true;
 
-    // Cabin
     const cabin = MeshBuilder.CreateBox(
       "policeCabin_" + index,
       { width: 1.6, height: 0.5, depth: 1.8 },
@@ -95,7 +128,6 @@ export function createPolice(
     cabin.parent = body;
     cabin.material = policeCabinMat;
 
-    // White stripe
     const stripe = MeshBuilder.CreateBox(
       "policeStripe_" + index,
       { width: 2.05, height: 0.1, depth: 1.0 },
@@ -105,7 +137,6 @@ export function createPolice(
     stripe.parent = body;
     stripe.material = policeStripeMat;
 
-    // Siren lights on top
     const sirenLeft = MeshBuilder.CreateBox(
       "sirenL_" + index,
       { width: 0.3, height: 0.2, depth: 0.3 },
@@ -124,7 +155,6 @@ export function createPolice(
     sirenRight.parent = body;
     sirenRight.material = sirenOffMat;
 
-    // Simple wheels — shared material
     const wheelPositions = [
       { x: -0.95, z: 1.3 },
       { x: 0.95, z: 1.3 },
@@ -145,8 +175,7 @@ export function createPolice(
     });
 
     shadowGenerator.addShadowCaster(body);
-
-    body.setEnabled(false); // Start inactive
+    body.setEnabled(false);
 
     return {
       root: body,
@@ -157,21 +186,43 @@ export function createPolice(
       active: false,
       steerAngle: 0,
       activeTimer: 0,
+      currentRoadAxis: null,
+      currentRoadPos: 0,
+      lastTurnTime: 0,
     };
   }
 
-  // Pre-create police cars
   for (let i = 0; i < maxPoliceCars; i++) {
     policeUnits.push(buildPoliceCar(i));
   }
 
-  // ============ SPAWN LOGIC ============
+  // ============ SMART SPAWN — spawn on roads from multiple directions ============
   function spawnPoliceCar(unit: PoliceUnit): void {
-    // Spawn far from player, on a road
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 80 + Math.random() * 70;
-    let spawnX = carRoot.position.x + Math.cos(angle) * dist;
-    let spawnZ = carRoot.position.z + Math.sin(angle) * dist;
+    const playerX = carRoot.position.x;
+    const playerZ = carRoot.position.z;
+
+    // Pick a random road to spawn on
+    const useZRoad = Math.random() > 0.5;
+    const roadIdx = Math.floor(Math.random() * ROAD_POSITIONS.length);
+    const roadPos = ROAD_POSITIONS[roadIdx];
+
+    let spawnX: number, spawnZ: number;
+    const spawnDist = 80 + Math.random() * 60;
+    const direction = Math.random() > 0.5 ? 1 : -1;
+
+    if (useZRoad) {
+      // Spawn on a Z-axis road (vertical)
+      spawnX = roadPos + (Math.random() > 0.5 ? 3.5 : -3.5); // lane offset
+      spawnZ = playerZ + direction * spawnDist;
+      unit.currentRoadAxis = "z";
+      unit.currentRoadPos = roadPos;
+    } else {
+      // Spawn on an X-axis road (horizontal)
+      spawnZ = roadPos + (Math.random() > 0.5 ? 3.5 : -3.5);
+      spawnX = playerX + direction * spawnDist;
+      unit.currentRoadAxis = "x";
+      unit.currentRoadPos = roadPos;
+    }
 
     // Clamp to world
     spawnX = Math.max(-380, Math.min(380, spawnX));
@@ -179,16 +230,17 @@ export function createPolice(
 
     unit.root.position.set(spawnX, 0.55, spawnZ);
     unit.root.rotation.y = Math.atan2(
-      carRoot.position.x - spawnX,
-      carRoot.position.z - spawnZ,
+      playerX - spawnX,
+      playerZ - spawnZ,
     );
     unit.speed = 0;
     unit.active = true;
     unit.activeTimer = 0;
+    unit.lastTurnTime = 0;
     unit.root.setEnabled(true);
   }
 
-  // ============ BUILDING AVOIDANCE ============
+  // ============ BUILDING AVOIDANCE with distance cull ============
   function checkPoliceBuilding(
     px: number,
     pz: number,
@@ -199,6 +251,10 @@ export function createPolice(
     let pushZ = 0;
     for (let i = 0; i < buildingData.length; i++) {
       const b = buildingData[i];
+      const ddx = b.x - px;
+      const ddz = b.z - pz;
+      if (ddx * ddx + ddz * ddz > 2500) continue;
+
       const bMinX = b.x - b.w / 2;
       const bMaxX = b.x + b.w / 2;
       const bMinZ = b.z - b.d / 2;
@@ -222,7 +278,6 @@ export function createPolice(
 
   // ============ UPDATE ============
   function updatePolice(dt: number): void {
-    // Calculate wanted level from heat (lower thresholds so hits matter)
     const prevLevel = wantedLevel;
     if (wantedHeat >= 12) wantedLevel = 5;
     else if (wantedHeat >= 8) wantedLevel = 4;
@@ -231,7 +286,6 @@ export function createPolice(
     else if (wantedHeat >= 0.5) wantedLevel = 1;
     else wantedLevel = 0;
 
-    // Decay cooldown — heat only decays once the cooldown expires
     if (heatDecayCooldown > 0) {
       heatDecayCooldown -= dt;
     } else if (wantedHeat > 0) {
@@ -243,7 +297,6 @@ export function createPolice(
     const targetCount = Math.min(wantedLevel, maxPoliceCars);
     let activeCount = policeUnits.filter((u) => u.active).length;
 
-    // Spawn new units if needed
     if (activeCount < targetCount) {
       for (const unit of policeUnits) {
         if (!unit.active && activeCount < targetCount) {
@@ -253,7 +306,6 @@ export function createPolice(
       }
     }
 
-    // Despawn excess units — only if they've been active long enough
     if (activeCount > targetCount) {
       for (let i = policeUnits.length - 1; i >= 0; i--) {
         const u = policeUnits[i];
@@ -262,12 +314,10 @@ export function createPolice(
           activeCount > targetCount &&
           u.activeTimer >= MIN_CHASE_TIME
         ) {
-          // Also only despawn if far from player (>100 units away)
           const dx = u.root.position.x - carRoot.position.x;
           const dz = u.root.position.z - carRoot.position.z;
           const distSq = dx * dx + dz * dz;
           if (distSq > 10000) {
-            // 100^2
             u.active = false;
             u.root.setEnabled(false);
             activeCount--;
@@ -276,40 +326,111 @@ export function createPolice(
       }
     }
 
-    // Update active police cars
+    // ============ UPDATE ACTIVE POLICE CARS ============
+    const playerX = carRoot.position.x;
+    const playerZ = carRoot.position.z;
+    // Estimate player velocity for intercept calculation
+    const playerForward = carRoot.getDirection(Axis.Z);
+
     policeUnits.forEach((unit) => {
       if (!unit.active) return;
 
-      // Track how long this unit has been active
       unit.activeTimer += dt;
+      unit.lastTurnTime += dt;
 
-      // Chase AI — steer toward player
-      const toPlayerX = carRoot.position.x - unit.root.position.x;
-      const toPlayerZ = carRoot.position.z - unit.root.position.z;
+      const ux = unit.root.position.x;
+      const uz = unit.root.position.z;
+      const toPlayerX = playerX - ux;
+      const toPlayerZ = playerZ - uz;
       const distSq = toPlayerX * toPlayerX + toPlayerZ * toPlayerZ;
       const dist = Math.sqrt(distSq);
 
-      // Target angle to player
-      const targetAngle = Math.atan2(toPlayerX, toPlayerZ);
+      // ─── INTERCEPT STEERING ───
+      // Instead of driving straight at the player, predict where the player
+      // will be in ~2 seconds and steer toward that point
+      const interceptTime = Math.min(dist / Math.max(unit.speed, 10), 3);
+      const playerSpeed = 20; // rough estimate — we don't have exact speed
+      const interceptX = playerX + playerForward.x * playerSpeed * interceptTime * 0.4;
+      const interceptZ = playerZ + playerForward.z * playerSpeed * interceptTime * 0.4;
+
+      // ─── ROAD-AWARE NAVIGATION ───
+      // If we're on a road, follow it until we get to an intersection near
+      // the intercept point, then turn toward the player
+      let steerTargetX = interceptX;
+      let steerTargetZ = interceptZ;
+
+      if (unit.currentRoadAxis && unit.lastTurnTime > 2) {
+        // Check if we're near an intersection where we should turn
+        const nearestRoadX = nearestRoadPos(ux);
+        const nearestRoadZ = nearestRoadPos(uz);
+
+        // Are we at an intersection?
+        const atIntersection =
+          Math.abs(ux - nearestRoadX) < ROAD_HALF &&
+          Math.abs(uz - nearestRoadZ) < ROAD_HALF;
+
+        if (atIntersection) {
+          // Should we turn? Turn if the target is closer on the perpendicular road
+          if (unit.currentRoadAxis === "z") {
+            // Currently going along Z, should we switch to X?
+            const distAlongCurrent = Math.abs(interceptZ - uz);
+            const distOnPerp = Math.abs(interceptX - ux);
+            if (distOnPerp > distAlongCurrent * 0.8 && unit.lastTurnTime > 4) {
+              unit.currentRoadAxis = "x";
+              unit.currentRoadPos = nearestRoadZ;
+              unit.lastTurnTime = 0;
+            }
+          } else {
+            const distAlongCurrent = Math.abs(interceptX - ux);
+            const distOnPerp = Math.abs(interceptZ - uz);
+            if (distOnPerp > distAlongCurrent * 0.8 && unit.lastTurnTime > 4) {
+              unit.currentRoadAxis = "z";
+              unit.currentRoadPos = nearestRoadX;
+              unit.lastTurnTime = 0;
+            }
+          }
+        }
+
+        // Gently steer toward road center while following it
+        if (unit.currentRoadAxis === "z") {
+          const roadCenterX = unit.currentRoadPos + (toPlayerX > 0 ? 3.5 : -3.5);
+          steerTargetX = roadCenterX + (interceptX - roadCenterX) * 0.2;
+        } else {
+          const roadCenterZ = unit.currentRoadPos + (toPlayerZ > 0 ? 3.5 : -3.5);
+          steerTargetZ = roadCenterZ + (interceptZ - roadCenterZ) * 0.2;
+        }
+      }
+
+      // When very close to player, drop road following and steer directly
+      if (dist < 30) {
+        steerTargetX = playerX;
+        steerTargetZ = playerZ;
+        unit.currentRoadAxis = null;
+      }
+
+      // Calculate target angle
+      const targetAngle = Math.atan2(
+        steerTargetX - ux,
+        steerTargetZ - uz,
+      );
       let angleDiff = targetAngle - unit.root.rotation.y;
 
-      // Normalize angle diff
       while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
       while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-      // Steer toward player
-      const steerRate = 2.0 + wantedLevel * 0.3;
+      // Steer rate scales with wanted level for more aggressive pursuit
+      const steerRate = 1.8 + wantedLevel * 0.4;
       unit.root.rotation.y += angleDiff * steerRate * dt;
 
-      // Speed control — chase with increasing aggression
-      const maxChaseSpeed = 15 + wantedLevel * 5;
+      // Speed — scales with wanted level
+      const maxChaseSpeed = 14 + wantedLevel * 5;
       const targetSpeed = dist > 5 ? maxChaseSpeed : 0;
 
       if (unit.speed < targetSpeed) {
-        unit.speed += 12 * dt;
+        unit.speed += 10 * dt;
         if (unit.speed > targetSpeed) unit.speed = targetSpeed;
       } else {
-        unit.speed -= 20 * dt;
+        unit.speed -= 18 * dt;
         if (unit.speed < 0) unit.speed = 0;
       }
 
@@ -329,6 +450,22 @@ export function createPolice(
       unit.root.position.z += push.pushZ;
       if (push.pushX !== 0 || push.pushZ !== 0) {
         unit.speed *= 0.5;
+        // If stuck in a building, try to find nearest road
+        if (!isOnRoad(unit.root.position.x, unit.root.position.z)) {
+          const nearX = nearestRoadPos(unit.root.position.x);
+          const nearZ = nearestRoadPos(unit.root.position.z);
+          const dxR = Math.abs(unit.root.position.x - nearX);
+          const dzR = Math.abs(unit.root.position.z - nearZ);
+          if (dxR < dzR) {
+            unit.root.position.x += (nearX - unit.root.position.x) * 2 * dt;
+            unit.currentRoadAxis = "z";
+            unit.currentRoadPos = nearX;
+          } else {
+            unit.root.position.z += (nearZ - unit.root.position.z) * 2 * dt;
+            unit.currentRoadAxis = "x";
+            unit.currentRoadPos = nearZ;
+          }
+        }
       }
 
       // World boundary
@@ -350,7 +487,6 @@ export function createPolice(
     });
 
     // ============ BUSTED CHECK ============
-    // If 2+ police cars within 3 units of player and player speed < 2
     if (wantedLevel > 0 && !bustedTriggered) {
       let nearbyCount = 0;
       for (let i = 0; i < policeUnits.length; i++) {
@@ -358,11 +494,9 @@ export function createPolice(
         if (!u.active) continue;
         const dx = u.root.position.x - carRoot.position.x;
         const dz = u.root.position.z - carRoot.position.z;
-        if (dx * dx + dz * dz < 9) nearbyCount++; // 3u radius
+        if (dx * dx + dz * dz < 9) nearbyCount++;
       }
 
-      // carRoot speed approximated from last frame — caller stops car on collision
-      // We check if car is essentially stationary (speed set to 0 on collision)
       if (nearbyCount >= 2) {
         bustedTimer += dt;
         if (bustedTimer >= BUSTED_THRESHOLD) {
@@ -383,7 +517,7 @@ export function createPolice(
 
   function addWantedHeat(amount: number): void {
     wantedHeat += amount;
-    heatDecayCooldown = HEAT_DECAY_COOLDOWN; // Reset decay cooldown on every crime
+    heatDecayCooldown = HEAT_DECAY_COOLDOWN;
   }
 
   function getPoliceUnits() {
@@ -410,7 +544,6 @@ export function createPolice(
     heatDecayCooldown = 0;
     bustedTimer = 0;
     bustedTriggered = false;
-    // Deactivate all police
     policeUnits.forEach((u) => {
       u.active = false;
       u.root.setEnabled(false);
@@ -418,8 +551,6 @@ export function createPolice(
   }
 
   function setPlayerSpeed(speed: number): void {
-    // Used to help busted check know player speed
-    // For now busted is proximity-based, but this could be extended
     void speed;
   }
 

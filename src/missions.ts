@@ -6,10 +6,10 @@ import type {
   MissionsResult,
   WeaponType,
 } from "./types";
+import { STORY_MISSION_IDS } from "./missiondata";
 
 /* ================================================================
- *  MISSION SYSTEM — step-based mission engine with waypoints,
- *  timers, objectives, and completion tracking
+ *  MISSION SYSTEM — linear story mode with auto-guidance
  * ================================================================ */
 
 interface MissionCallbacks {
@@ -28,8 +28,8 @@ interface MissionCallbacks {
   addWeapon: (type: WeaponType, ammo?: number) => void;
 }
 
-const WAYPOINT_REACH_DIST = 8; // Distance to consider a waypoint reached
-const KILL_CHECK_DIST = 20; // Distance to check kill objectives
+const WAYPOINT_REACH_DIST = 8;
+const KILL_CHECK_DIST = 20;
 
 export function createMissions(
   scene: Scene,
@@ -42,6 +42,7 @@ export function createMissions(
   let stepTimer = 0;
   let stepKillCount = 0;
   let stepCollectedIndices = new Set<number>();
+  let storyComplete = false;
 
   // Waypoint marker mesh
   const waypointMat = new StandardMaterial("waypointMat", scene);
@@ -76,10 +77,6 @@ export function createMissions(
     collectMarkers.push(m);
   }
 
-  // Mission giver markers (floating rotating arrows)
-  const giverMarkers: { mesh: Mesh; x: number; z: number; rotPhase: number }[] =
-    [];
-
   function showWaypoint(x: number, z: number): void {
     waypointMarker.position.set(x, 7.5, z);
     waypointMarker.isVisible = true;
@@ -110,7 +107,6 @@ export function createMissions(
 
     const nextStep = getCurrentStep();
     if (!nextStep) {
-      // Mission complete!
       completeMission();
       return;
     }
@@ -124,7 +120,7 @@ export function createMissions(
     if (step.timeLimit) {
       stepTimer = step.timeLimit;
     } else {
-      stepTimer = -1; // no timer
+      stepTimer = -1;
     }
 
     if (
@@ -137,7 +133,6 @@ export function createMissions(
         showWaypoint(step.targetX, step.targetZ);
       }
     } else if (step.type === "race" || step.type === "collect") {
-      // Show all target markers for collect/race
       if (step.targets) {
         step.targets.forEach((t, i) => {
           if (i < collectMarkers.length) {
@@ -145,7 +140,6 @@ export function createMissions(
             collectMarkers[i].isVisible = true;
           }
         });
-        // Show first uncollected as waypoint
         const firstUncollected = step.targets.find(
           (_, i) => !stepCollectedIndices.has(i),
         );
@@ -177,20 +171,23 @@ export function createMissions(
     hideWaypoint();
     hideAllCollectMarkers();
     activeMission = null;
+
+    // Check if story is complete
+    if (isStoryComplete()) {
+      storyComplete = true;
+    }
   }
 
   function startMission(id: string): boolean {
-    if (activeMission) return false; // already in a mission
+    if (activeMission) return false;
 
     const def = allMissions.find((m) => m.id === id);
     if (!def) return false;
 
-    // Check prerequisites
     for (const req of def.requiredMissions) {
       if (!completedMissions.has(req)) return false;
     }
 
-    // Check if already completed and not repeatable
     if (completedMissions.has(id) && !def.repeatable) return false;
 
     activeMission = { id, stepIndex: 0, def };
@@ -216,16 +213,38 @@ export function createMissions(
     activeMission = null;
   }
 
+  /** Notify the mission system that a kill happened near the given position */
+  function notifyKill(x: number, z: number): void {
+    if (!activeMission) return;
+    const step = getCurrentStep();
+    if (!step || step.type !== "kill") return;
+
+    // Check if kill is in the mission area
+    if (step.targetX !== undefined && step.targetZ !== undefined) {
+      const dx = x - step.targetX;
+      const dz = z - step.targetZ;
+      if (dx * dx + dz * dz > KILL_CHECK_DIST * KILL_CHECK_DIST) return;
+    }
+
+    stepKillCount++;
+    const needed = step.count || 1;
+    callbacks.onObjectiveUpdate(
+      `${step.description} (${Math.min(stepKillCount, needed)}/${needed})`,
+    );
+
+    if (stepKillCount >= needed) {
+      advanceStep();
+    }
+  }
+
   function updateMissions(dt: number): void {
     if (!activeMission) {
-      // Rotate waypoint marker slowly when visible (for ambient effect)
       if (waypointMarker.isVisible) {
         waypointMarker.rotation.y += dt * 2;
       }
       return;
     }
 
-    // Rotate the waypoint marker
     waypointMarker.rotation.y += dt * 2;
     collectMarkers.forEach((m) => {
       if (m.isVisible) m.rotation.y += dt * 3;
@@ -246,7 +265,6 @@ export function createMissions(
 
     const pos = callbacks.getPlayerPosition();
 
-    // Check step completion based on type
     switch (step.type) {
       case "go-to":
       case "delivery":
@@ -276,7 +294,6 @@ export function createMissions(
                 collectMarkers[i].isVisible = false;
               }
 
-              // Update waypoint to next uncollected
               const nextUncollected = step.targets.find(
                 (_, j) => !stepCollectedIndices.has(j),
               );
@@ -284,7 +301,6 @@ export function createMissions(
                 showWaypoint(nextUncollected.x, nextUncollected.z);
               }
 
-              // Check if all collected
               const needed = step.count || step.targets.length;
               if (stepCollectedIndices.size >= needed) {
                 advanceStep();
@@ -301,7 +317,7 @@ export function createMissions(
       }
 
       case "kill": {
-        // Kill count is incremented externally via notifyKill()
+        // Kill count is updated via notifyKill()
         const needed = step.count || 1;
         if (stepKillCount >= needed) {
           advanceStep();
@@ -309,6 +325,40 @@ export function createMissions(
         break;
       }
     }
+  }
+
+  // ============ STORY PROGRESSION ============
+
+  /** Get the next story mission the player should do */
+  function getNextStoryMission(): MissionDef | null {
+    for (const id of STORY_MISSION_IDS) {
+      if (completedMissions.has(id)) continue;
+      const def = allMissions.find((m) => m.id === id);
+      if (!def) continue;
+      // Check if prerequisites are met
+      const prereqsMet = def.requiredMissions.every((r) =>
+        completedMissions.has(r),
+      );
+      if (prereqsMet) return def;
+    }
+    return null;
+  }
+
+  /** Get story progress as "X/5" */
+  function getStoryProgress(): { completed: number; total: number } {
+    let completed = 0;
+    for (const id of STORY_MISSION_IDS) {
+      if (completedMissions.has(id)) completed++;
+    }
+    return { completed, total: STORY_MISSION_IDS.length };
+  }
+
+  function isStoryComplete(): boolean {
+    return STORY_MISSION_IDS.every((id) => completedMissions.has(id));
+  }
+
+  function getStoryComplete(): boolean {
+    return storyComplete;
   }
 
   function getActiveMission(): {
@@ -329,9 +379,7 @@ export function createMissions(
 
   function getAvailableMissions(): MissionDef[] {
     return allMissions.filter((m) => {
-      // Completed non-repeatable missions are not available
       if (completedMissions.has(m.id) && !m.repeatable) return false;
-      // Check prerequisites
       for (const req of m.requiredMissions) {
         if (!completedMissions.has(req)) return false;
       }
@@ -347,5 +395,11 @@ export function createMissions(
     isMissionActive,
     getCompletedMissions,
     getAvailableMissions,
+    // New story features
+    notifyKill,
+    getNextStoryMission,
+    getStoryProgress,
+    isStoryComplete,
+    getStoryComplete,
   };
 }

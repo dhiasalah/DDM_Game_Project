@@ -18,9 +18,9 @@ export function setupLighting(scene: Scene): LightingResult {
     new Vector3(0, 1, 0),
     scene,
   );
-  hemiLight.intensity = 0.35;
-  hemiLight.diffuse = new Color3(0.9, 0.9, 1.0);
-  hemiLight.groundColor = new Color3(0.3, 0.25, 0.2);
+  hemiLight.intensity = 0.7;
+  hemiLight.diffuse = new Color3(0.95, 0.95, 1.0);
+  hemiLight.groundColor = new Color3(0.5, 0.45, 0.4);
 
   // --- Directional "sun" light ---
   const sunLight = new DirectionalLight(
@@ -29,12 +29,12 @@ export function setupLighting(scene: Scene): LightingResult {
     scene,
   );
   sunLight.position = new Vector3(50, 80, 50);
-  sunLight.intensity = 0.9;
+  sunLight.intensity = 1.4;
   sunLight.diffuse = new Color3(1.0, 0.95, 0.85);
   sunLight.specular = new Color3(1.0, 0.95, 0.8);
 
   // --- Shadow Generator (optimized settings) ---
-  const shadowGenerator = new ShadowGenerator(512, sunLight);
+  const shadowGenerator = new ShadowGenerator(256, sunLight);
   shadowGenerator.useBlurExponentialShadowMap = true;
   shadowGenerator.blurKernel = 4; // Reduced from 8
   shadowGenerator.blurScale = 1; // Reduced from 2
@@ -51,21 +51,21 @@ export function setupLighting(scene: Scene): LightingResult {
 
   // --- Post-processing Pipeline (optimized settings) ---
   const pipeline = new DefaultRenderingPipeline("defaultPipeline", true, scene);
-  pipeline.bloomEnabled = true;
+  pipeline.bloomEnabled = false;
   pipeline.bloomThreshold = 0.8;
   pipeline.bloomWeight = 0.25;
-  pipeline.bloomKernel = 8; // Reduced from 16
+  pipeline.bloomKernel = 8;
   pipeline.bloomScale = 0.5;
 
-  pipeline.fxaaEnabled = true;
+  pipeline.fxaaEnabled = false;
   pipeline.samples = 1;
 
   pipeline.imageProcessing.toneMappingEnabled = true;
   pipeline.imageProcessing.toneMappingType =
     ImageProcessingConfiguration.TONEMAPPING_ACES;
 
-  pipeline.imageProcessing.contrast = 1.3;
-  pipeline.imageProcessing.exposure = 1.1;
+  pipeline.imageProcessing.contrast = 1.1;
+  pipeline.imageProcessing.exposure = 1.5;
 
   return { shadowGenerator, glowLayer, pipeline, sunLight };
 }

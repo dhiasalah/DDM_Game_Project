@@ -128,6 +128,8 @@ async function main(): Promise<void> {
       showMissionStart,
       hideMissionStart,
       showMissionFailed,
+      updateStoryProgress,
+      showStoryComplete,
     } = createHUD(scene);
 
     // --- Game State ---
@@ -156,6 +158,9 @@ async function main(): Promise<void> {
     weapons.addWeapon("pistol", 60);
     weapons.addWeapon("bat");
 
+    // Forward-declare mission system (assigned later, used in callbacks)
+    let missionsResult!: import("./types").MissionsResult;
+
     // --- Shooting System ---
     const shootingResult = createShooting({
       scene,
@@ -178,6 +183,10 @@ async function main(): Promise<void> {
       onPedHit: (pos) => {
         showCollisionText("HIT!", "#ffcc00");
         triggerHitParticles(pos);
+        // Notify mission system about the kill (pos is a Vector3)
+        if (missionsResult) {
+          missionsResult.notifyKill(pos.x, pos.z);
+        }
       },
       addWantedHeat: (amount) => policeResult.addWantedHeat(amount),
     });
@@ -209,6 +218,10 @@ async function main(): Promise<void> {
           policeResult.addWantedHeat(1.0);
           gameState.addKill();
           gameState.addMoney(Math.floor(5 + Math.random() * 15));
+          // Notify mission system about the kill
+          if (missionsResult) {
+            missionsResult.notifyKill(hitPos.x, hitPos.z);
+          }
         },
         onDestructibleHit(obj) {
           triggerCollisionSparks(obj.mesh.position);
@@ -259,7 +272,7 @@ async function main(): Promise<void> {
     );
 
     // --- Mission System ---
-    const missionsResult = createMissions(scene, missionDefs, {
+    missionsResult = createMissions(scene, missionDefs, {
       onObjectiveUpdate: (text) => updateMissionObjective(text, true),
       onTimerUpdate: (timeLeft) => updateMissionTimer(timeLeft, true),
       onMissionStart: (title, description) => {
@@ -267,12 +280,19 @@ async function main(): Promise<void> {
         // Auto-hide after 4 seconds
         setTimeout(() => hideMissionStart(), 4000);
       },
-      onMissionComplete: (id, reward) => {
+      onMissionComplete: (_id, reward) => {
         gameState.completeMission();
         showMissionComplete(0);
         updateMissionObjective("", false);
         updateMissionTimer(0, false);
         showCollisionText(`MISSION COMPLETE! +$${reward.money}`, "#00ff66");
+        // Update story progress
+        const progress = missionsResult.getStoryProgress();
+        updateStoryProgress(progress.completed, progress.total);
+        // Check if story is fully complete
+        if (missionsResult.getStoryComplete()) {
+          showStoryComplete();
+        }
       },
       onMissionFail: (reason) => {
         showMissionFailed(reason);
@@ -869,8 +889,23 @@ async function main(): Promise<void> {
       // Wanted level HUD
       updateWantedLevel(policeResult.getWantedLevel());
 
-      // Mission hint (shows when no mission active)
-      updateMissionHint(missionsResult.isMissionActive(), currentMode);
+      // Mission hint with story guidance
+      let guidanceText: string | undefined;
+      if (!missionsResult.isMissionActive() && !missionsResult.getStoryComplete()) {
+        const nextMission = missionsResult.getNextStoryMission();
+        if (nextMission) {
+          const giverName = missionGivers[nextMission.giverId]?.name || nextMission.giverId;
+          if (currentMode === "driving") {
+            guidanceText = `📍 Go to ${giverName} for: "${nextMission.title}" — Press F to exit car, then E near ★`;
+          } else {
+            guidanceText = `📍 Walk to ${giverName} (★ on map) and press E — Next: "${nextMission.title}"`;
+          }
+        }
+      }
+      updateMissionHint(missionsResult.isMissionActive(), currentMode, guidanceText);
+      // Update story progress HUD
+      const storyProg = missionsResult.getStoryProgress();
+      updateStoryProgress(storyProg.completed, storyProg.total);
     });
 
     return scene;

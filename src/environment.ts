@@ -1302,8 +1302,12 @@ export function createEnvironment(
 
   // ========== VISIBILITY CULLING ==========
   const TRAFFIC_LIGHT_VIS_SQ = 120 * 120; // traffic lights visible within 120 units
+  let visFrameCounter = 0;
 
   function updateVisibility(playerX: number, playerZ: number): void {
+    // Only update visibility every 4 frames to reduce CPU cost
+    visFrameCounter++;
+    if (visFrameCounter % 4 !== 0) return;
     for (let i = 0; i < buildingMeshes.length; i++) {
       const b = buildingData[i];
       if (!b) continue;
@@ -1336,8 +1340,9 @@ export function createEnvironment(
   }
 
   // ========== FOG ==========
-  scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.001;
+  scene.fogMode = Scene.FOGMODE_LINEAR;
+  scene.fogStart = 150;
+  scene.fogEnd = 280;
   scene.fogColor = new Color3(0.7, 0.75, 0.85);
 
   scene.ambientColor = new Color3(0.3, 0.3, 0.35);

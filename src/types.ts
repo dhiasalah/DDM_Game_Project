@@ -249,7 +249,10 @@ export interface HUDResult {
   ) => void;
   setMinimapRoads: (roadsX: number[], roadsZ: number[]) => void;
   toggleHelp: () => void;
-  updateMissionHint: (hasMission: boolean, mode: string) => void;
+  updateMissionHint: (hasMission: boolean, mode: string, guidanceText?: string) => void;
+  // Story mode
+  updateStoryProgress: (completed: number, total: number) => void;
+  showStoryComplete: () => void;
 }
 
 // ── Minimap ──
@@ -394,6 +397,12 @@ export interface MissionsResult {
   isMissionActive: () => boolean;
   getCompletedMissions: () => string[];
   getAvailableMissions: () => MissionDef[];
+  // Story mode
+  notifyKill: (x: number, z: number) => void;
+  getNextStoryMission: () => MissionDef | null;
+  getStoryProgress: () => { completed: number; total: number };
+  isStoryComplete: () => boolean;
+  getStoryComplete: () => boolean;
 }
 
 // ── Economy ──

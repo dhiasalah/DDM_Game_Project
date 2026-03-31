@@ -24,8 +24,8 @@ const ROAD_HALF = 7; // half width of a road (14-unit roads)
 const LANE_OFFSET = 3.5; // offset from road center to lane center
 const SPAWN_DIST = 180; // spawn traffic within this distance from player
 const DESPAWN_DIST = 250; // despawn traffic beyond this distance
-const MAX_TRAFFIC = 25; // total pool size
-const MAX_ACTIVE = 15; // max active at once
+const MAX_TRAFFIC = 18; // total pool size
+const MAX_ACTIVE = 10; // max active at once
 
 interface TrafficCar {
   root: Mesh;
@@ -515,16 +515,37 @@ export function createTraffic(
   // Cached active list — rebuilt only in updateTraffic, not on every getter call
   let cachedActive: TrafficCarData[] = [];
   let cachedAll: TrafficCarData[] = [];
+  let cacheDirty = true;
 
   function rebuildCaches(): void {
-    cachedAll = trafficCars.map((c) => ({
-      root: c.root,
-      speed: c.speed,
-      active: c.active,
-      lane: c.lane,
-      vehicleType: c.vehicleType,
-    }));
-    cachedActive = cachedAll.filter((c) => c.active);
+    // Rebuild all list only when pool size changes (rare)
+    if (cachedAll.length !== trafficCars.length) {
+      cachedAll = trafficCars.map((c) => ({
+        root: c.root,
+        speed: c.speed,
+        active: c.active,
+        lane: c.lane,
+        vehicleType: c.vehicleType,
+      }));
+    } else {
+      // Update in-place — no allocation
+      for (let i = 0; i < trafficCars.length; i++) {
+        const c = trafficCars[i];
+        const t = cachedAll[i];
+        t.speed = c.speed;
+        t.active = c.active;
+        t.lane = c.lane;
+      }
+    }
+    // Rebuild active list (reuse array, splice to size)
+    let ai = 0;
+    for (let i = 0; i < cachedAll.length; i++) {
+      if (cachedAll[i].active) {
+        cachedActive[ai] = cachedAll[i];
+        ai++;
+      }
+    }
+    cachedActive.length = ai;
   }
 
   function getTrafficCars(): TrafficCarData[] {

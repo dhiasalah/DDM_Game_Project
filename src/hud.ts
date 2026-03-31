@@ -1195,7 +1195,7 @@ export function createHUD(scene: Scene): HUDResult {
   advancedTexture.addControl(missionHint);
 
   let hintPulse = 0;
-  function updateMissionHint(hasMission: boolean, mode: string): void {
+  function updateMissionHint(hasMission: boolean, mode: string, guidanceText?: string): void {
     if (hasMission) {
       missionHint.alpha = 0;
       return;
@@ -1203,13 +1203,115 @@ export function createHUD(scene: Scene): HUDResult {
     hintPulse += 0.04;
     const pulse = 0.5 + Math.sin(hintPulse) * 0.3;
     missionHint.alpha = pulse;
-    if (mode === "driving") {
+    if (guidanceText) {
+      missionHint.text = guidanceText;
+    } else if (mode === "driving") {
       missionHint.text =
         "💡 Press F to exit car → Walk to ★ marker → Press E for missions";
     } else {
       missionHint.text =
         "💡 Walk to a ★ yellow marker on the minimap and press E";
     }
+  }
+
+  // ============ STORY PROGRESS (top-left, below wanted stars) ============
+  const storyPanel = new Rectangle("storyPanel");
+  storyPanel.width = "200px";
+  storyPanel.height = "40px";
+  storyPanel.cornerRadius = 8;
+  storyPanel.color = "rgba(255, 200, 0, 0.4)";
+  storyPanel.thickness = 1;
+  storyPanel.background = "rgba(0, 0, 0, 0.5)";
+  storyPanel.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+  storyPanel.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+  storyPanel.left = "20px";
+  storyPanel.top = "75px";
+  advancedTexture.addControl(storyPanel);
+
+  const storyProgressText = new TextBlock("storyProgressText");
+  storyProgressText.text = "STORY: MISSION 1/5";
+  storyProgressText.color = "#ffd700";
+  storyProgressText.fontSize = 15;
+  storyProgressText.fontWeight = "bold";
+  storyProgressText.fontFamily = "'Segoe UI', Tahoma, sans-serif";
+  storyPanel.addControl(storyProgressText);
+
+  function updateStoryProgress(completed: number, total: number): void {
+    if (completed >= total) {
+      storyProgressText.text = "✅ STORY COMPLETE";
+      storyProgressText.color = "#44ff66";
+    } else {
+      storyProgressText.text = `STORY: MISSION ${completed + 1}/${total}`;
+      storyProgressText.color = "#ffd700";
+    }
+  }
+
+  // ============ STORY COMPLETE SCREEN ============
+  const storyCompleteOverlay = new Rectangle("storyCompleteOverlay");
+  storyCompleteOverlay.width = "100%";
+  storyCompleteOverlay.height = "100%";
+  storyCompleteOverlay.background = "rgba(0, 0, 0, 0.0)";
+  storyCompleteOverlay.color = "transparent";
+  storyCompleteOverlay.thickness = 0;
+  storyCompleteOverlay.alpha = 0;
+  storyCompleteOverlay.zIndex = 110;
+  advancedTexture.addControl(storyCompleteOverlay);
+
+  const storyCompleteTitle = new TextBlock("storyCompleteTitle");
+  storyCompleteTitle.text = "🏆 STORY COMPLETE 🏆";
+  storyCompleteTitle.color = "#ffd700";
+  storyCompleteTitle.fontSize = 56;
+  storyCompleteTitle.fontWeight = "bold";
+  storyCompleteTitle.fontFamily = "'Segoe UI', Tahoma, sans-serif";
+  storyCompleteTitle.shadowColor = "rgba(0,0,0,0.8)";
+  storyCompleteTitle.shadowBlur = 15;
+  storyCompleteTitle.shadowOffsetX = 3;
+  storyCompleteTitle.shadowOffsetY = 3;
+  storyCompleteTitle.top = "-40px";
+  storyCompleteOverlay.addControl(storyCompleteTitle);
+
+  const storyCompleteSub = new TextBlock("storyCompleteSub");
+  storyCompleteSub.text = "You conquered the city. The streets are yours.";
+  storyCompleteSub.color = "rgba(255, 255, 255, 0.8)";
+  storyCompleteSub.fontSize = 22;
+  storyCompleteSub.fontFamily = "'Segoe UI', Tahoma, sans-serif";
+  storyCompleteSub.top = "20px";
+  storyCompleteOverlay.addControl(storyCompleteSub);
+
+  const storyCompleteHint = new TextBlock("storyCompleteHint");
+  storyCompleteHint.text = "Free roam continues — have fun!";
+  storyCompleteHint.color = "rgba(255, 255, 255, 0.5)";
+  storyCompleteHint.fontSize = 16;
+  storyCompleteHint.fontFamily = "'Segoe UI', Tahoma, sans-serif";
+  storyCompleteHint.top = "60px";
+  storyCompleteOverlay.addControl(storyCompleteHint);
+
+  function showStoryComplete(): void {
+    storyCompleteOverlay.background = "rgba(0, 20, 0, 0.75)";
+    storyCompleteOverlay.alpha = 0;
+
+    let fadeIn = 0;
+    const fadeInterval = setInterval(() => {
+      fadeIn += 0.02;
+      if (fadeIn >= 1) {
+        fadeIn = 1;
+        clearInterval(fadeInterval);
+        // Auto-hide after 8 seconds
+        setTimeout(() => {
+          let fadeOut = 1;
+          const fadeOutInterval = setInterval(() => {
+            fadeOut -= 0.02;
+            if (fadeOut <= 0) {
+              storyCompleteOverlay.alpha = 0;
+              clearInterval(fadeOutInterval);
+            } else {
+              storyCompleteOverlay.alpha = fadeOut;
+            }
+          }, 30);
+        }, 8000);
+      }
+      storyCompleteOverlay.alpha = fadeIn;
+    }, 30);
   }
 
   return {
@@ -1237,5 +1339,9 @@ export function createHUD(scene: Scene): HUDResult {
     setMinimapRoads,
     toggleHelp,
     updateMissionHint,
+    // Story mode additions
+    updateStoryProgress,
+    showStoryComplete,
   };
 }
+
