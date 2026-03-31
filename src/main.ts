@@ -1,4 +1,4 @@
-import { Engine, Scene, Vector3 } from "@babylonjs/core";
+import { Engine, Scene, Vector3, MeshBuilder, StandardMaterial, Color3 } from "@babylonjs/core";
 
 import { setupInput } from "./input";
 import { setupLighting } from "./lighting";
@@ -271,6 +271,9 @@ async function main(): Promise<void> {
       })),
     );
 
+    // Track active waypoint for minimap
+    let currentWaypoint: { x: number; z: number } | null = null;
+
     // --- Mission System ---
     missionsResult = createMissions(scene, missionDefs, {
       onObjectiveUpdate: (text) => updateMissionObjective(text, true),
@@ -300,11 +303,11 @@ async function main(): Promise<void> {
         updateMissionTimer(0, false);
         setTimeout(() => hideMissionStart(), 3000);
       },
-      onWaypointSet: (_x, _z) => {
-        /* handled by minimap markers */
+      onWaypointSet: (x, z) => {
+        currentWaypoint = { x, z };
       },
       onWaypointClear: () => {
-        /* handled by minimap markers */
+        currentWaypoint = null;
       },
       getPlayerPosition: () => {
         if (currentMode === "driving") {
@@ -318,6 +321,30 @@ async function main(): Promise<void> {
       addMoney: (amount) => gameState.addMoney(amount),
       addWeapon: (type, ammo) => weapons.addWeapon(type, ammo),
     });
+
+    // --- Mission Giver Visual Markers ---
+    for (const [id, giver] of Object.entries(missionGivers)) {
+      const marker = MeshBuilder.CreateTorus(
+        "giverMarker_" + id,
+        { diameter: 3.5, thickness: 0.8, tessellation: 16 },
+        scene
+      );
+      marker.position.set(giver.x, 1, giver.z);
+      
+      const mat = new StandardMaterial("giverMat_" + id, scene);
+      mat.emissiveColor = new Color3(1, 0.8, 0); // Yellow
+      mat.diffuseColor = mat.emissiveColor;
+      mat.alpha = 0.7;
+      mat.disableLighting = true;
+      marker.material = mat;
+      marker.isPickable = false;
+
+      // Add a simple animation so it spins and bobs
+      scene.onBeforeRenderObservable.add(() => {
+        marker.rotation.x += 0.03;
+        marker.rotation.y += 0.04;
+      });
+    }
 
     // --- Economy System ---
     const economyResult = createEconomy(scene, shadowGenerator, {
@@ -613,7 +640,7 @@ async function main(): Promise<void> {
           // Priority 2: Mission givers
           const pxE = playerResult.playerMesh.position.x;
           const pzE = playerResult.playerMesh.position.z;
-          const GIVER_DIST = 6;
+          const GIVER_DIST = 12; // Increased distance to make it easier to trigger
           for (const [giverId, giver] of Object.entries(missionGivers)) {
             const gdx = pxE - giver.x;
             const gdz = pzE - giver.z;
@@ -841,17 +868,13 @@ async function main(): Promise<void> {
       }
 
       // Active mission waypoint marker (green dot)
-      const activeMission = missionsResult.getActiveMission();
-      if (activeMission) {
-        const step = activeMission.def.steps[activeMission.stepIndex];
-        if (step && step.targetX !== undefined && step.targetZ !== undefined) {
-          mmMarkers.push({
-            x: step.targetX,
-            z: step.targetZ,
-            color: "#00ff66",
-            type: "waypoint",
-          });
-        }
+      if (currentWaypoint) {
+        mmMarkers.push({
+          x: currentWaypoint.x,
+          z: currentWaypoint.z,
+          color: "#00ff66",
+          type: "waypoint",
+        });
       }
 
       // Economy location markers (shops, safehouses, etc.)

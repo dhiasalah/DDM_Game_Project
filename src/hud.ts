@@ -873,27 +873,23 @@ export function createHUD(scene: Scene): HUDResult {
   minimapLabel.top = minimapRadius - 14 + "px";
   minimapPanel.addControl(minimapLabel);
 
-  // Player dot (always centered) — bright and bigger
-  const playerDot = new Rectangle("playerDot");
-  playerDot.width = "8px";
-  playerDot.height = "8px";
-  playerDot.cornerRadius = 4;
-  playerDot.background = "#ffffff";
-  playerDot.color = "#00ccff";
-  playerDot.thickness = 1;
-  playerDot.zIndex = 20;
-  minimapPanel.addControl(playerDot);
+  // Player tracking marker (moves on the map)
+  const playerMarker = new Rectangle("playerMarker");
+  playerMarker.width = "24px";
+  playerMarker.height = "24px";
+  playerMarker.thickness = 0;
+  playerMarker.color = "transparent";
+  playerMarker.zIndex = 25;
+  minimapPanel.addControl(playerMarker);
 
-  // Player direction indicator
-  const playerArrow = new Rectangle("playerArrow");
-  playerArrow.width = "4px";
-  playerArrow.height = "14px";
-  playerArrow.background = "#00ccff";
-  playerArrow.color = "transparent";
-  playerArrow.thickness = 0;
-  playerArrow.top = "-11px";
-  playerArrow.zIndex = 20;
-  minimapPanel.addControl(playerArrow);
+  const playerArrow = new TextBlock("playerArrow");
+  playerArrow.text = "▲";
+  playerArrow.color = "#00ffff"; // Cyan clair très visible
+  playerArrow.fontSize = 18;
+  playerArrow.fontWeight = "bold";
+  playerArrow.shadowColor = "rgba(0,0,0,1)";
+  playerArrow.shadowBlur = 4;
+  playerMarker.addControl(playerArrow);
 
   // Minimap marker dots (reusable pool — bigger)
   const maxMinimapDots = 30;
@@ -926,7 +922,7 @@ export function createHUD(scene: Scene): HUDResult {
     minimapDotLabels.push(lbl);
   }
 
-  const MINIMAP_SCALE = 0.55; // pixels per world unit on minimap
+  const MINIMAP_SCALE = 0.275; // fits 400 world units into 110px radius
   let mmRoadsX: number[] = []; // horizontal road Z-positions
   let mmRoadsZ: number[] = []; // vertical road X-positions
 
@@ -947,15 +943,26 @@ export function createHUD(scene: Scene): HUDResult {
     compassN.left = "0px";
     compassN.top = -(minimapRadius - 10) + "px";
 
-    // Rotate only the player arrow to show facing direction
-    playerArrow.rotation = playerRot;
+    // Move player marker on the map
+    let px = playerX * MINIMAP_SCALE;
+    let pz = -playerZ * MINIMAP_SCALE; // Negate Z so +Z (North) is UP
+    const pDist = Math.sqrt(px * px + pz * pz);
+    // Bind to the edge of the circular map if far out
+    if (pDist > maxDist) {
+      const pScale = maxDist / pDist;
+      px *= pScale;
+      pz *= pScale;
+    }
+    playerMarker.left = px + "px";
+    playerMarker.top = pz + "px";
+    playerMarker.rotation = playerRot;
 
     // --- Draw road grid lines (fixed north-up) ---
     let roadIdx = 0;
     // Vertical roads (at certain X positions → horizontal offset on minimap)
     for (let ri = 0; ri < mmRoadsZ.length && roadIdx < maxRoadLines; ri++) {
       const wx = mmRoadsZ[ri];
-      const sx = (wx - playerX) * MINIMAP_SCALE;
+      const sx = wx * MINIMAP_SCALE;
       if (Math.abs(sx) > maxDist + 10) continue;
       roadLines[roadIdx].left = sx + "px";
       roadLines[roadIdx].top = "0px";
@@ -966,7 +973,7 @@ export function createHUD(scene: Scene): HUDResult {
     // Horizontal roads (at certain Z positions → vertical offset on minimap)
     for (let ri = 0; ri < mmRoadsX.length && roadIdx < maxRoadLines; ri++) {
       const wz = mmRoadsX[ri];
-      const sy = (wz - playerZ) * MINIMAP_SCALE;
+      const sy = -wz * MINIMAP_SCALE; // Negate Z
       if (Math.abs(sy) > maxDist + 10) continue;
       roadLines[roadIdx].left = "0px";
       roadLines[roadIdx].top = sy + "px";
@@ -983,9 +990,9 @@ export function createHUD(scene: Scene): HUDResult {
     for (let i = 0; i < maxMinimapDots; i++) {
       if (i < markers.length) {
         const m = markers[i];
-        // Simple world offset: X is right, Z is down on minimap
-        let sx = (m.x - playerX) * MINIMAP_SCALE;
-        let sy = (m.z - playerZ) * MINIMAP_SCALE;
+        // Absolute world offset
+        let sx = m.x * MINIMAP_SCALE;
+        let sy = -m.z * MINIMAP_SCALE; // Negate Z
         const dist = Math.sqrt(sx * sx + sy * sy);
 
         if (dist > maxDist) {

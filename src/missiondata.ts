@@ -79,23 +79,23 @@ export const missionDefs: MissionDef[] = [
   // ═══════════════════════════════════════════════════════════
   {
     id: "story_3_hit",
-    title: "Clean the Streets",
+    title: "Cause Chaos",
     description:
-      "Tony needs you to deal with some troublemakers. Get out of the car and handle business.",
+      "Tony needs you to send a message to the rival gang. Head to their intersection and take out 3 people (pedestrians).",
     type: "kill",
     giverId: "tony",
     steps: [
       {
         type: "go-to",
-        description: "Drive to the gang territory",
-        targetX: -200,
-        targetZ: -200,
+        description: "Drive to the rival gang's intersection",
+        targetX: -150,
+        targetZ: -150,
       },
       {
         type: "kill",
-        description: "Eliminate the gang members",
-        targetX: -200,
-        targetZ: -200,
+        description: "Take out 3 gang members (pedestrians) at the intersection",
+        targetX: -150,
+        targetZ: -150,
         count: 3,
       },
       {
